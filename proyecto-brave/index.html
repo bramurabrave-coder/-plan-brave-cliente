@@ -1,0 +1,2844 @@
+<!DOCTYPE html>
+<!--
+  ===========================================================================
+  PLANTILLA MAESTRA BRAVE v3 — Ficha de Cliente
+  Última actualización: julio 2026
+  ===========================================================================
+
+  MOTOR (NO TOCAR):
+  - CSS completo con paleta configurable por cliente
+  - Navegación 9 secciones (Inicio · Atajos · Nutrición · Suplementos ·
+    Hidratación · Descanso · Entreno · Seguimiento · Motivación)
+  - Timer global (descanso entre series) + mini-timers en casa + motor WOD AMRAP
+  - Web Audio API con auto-recuperación en iOS (contexto muerto → se recrea)
+  - Screen Wake Lock + fallback video invisible para iOS (pantalla encendida
+    mientras el timer corre, incluso en iPhone)
+  - Plan de 30 días con renovación automática desde PLAN_INICIO
+  - PIN de ajuste de fecha (COACH_PIN)
+  - Botón WhatsApp al coach en días finales del ciclo
+  - localStorage namespaceado con CLIENTE_SLUG (historial, fotos, notas, agua)
+  - Sección "Versión en Casa" en todos los días de entreno:
+      · Lun/Mar/Jue: lista con video individual por ejercicio + timer de descanso
+      · Mié/Vie: WOD AMRAP con timer que muestra ejercicio actual + reps + video
+
+  PALETA (editar variables :root al inicio del <style>):
+  - --azul-oscuro: color principal (nav, headers)
+  - --azul-medio:  color de acento (botones, tabs activos)
+  - --azul-claro:  color suave (bordes, hovers)
+  Para cliente femenino en rosa/fucsia, cambiar estos 3 valores.
+  Para cliente masculino en azul BRAVE original:
+    --azul-oscuro: #1A2F5A · --azul-medio: #2E6DA4 · --azul-claro: #4A90D9
+
+  INYECCIONES POR CLIENTE (ver archivo INYECCIONES.md):
+  1. Bloque CONFIGURACIÓN al final del JS (SLUG, NOMBRE, FECHA, CÓDIGO)
+  2. Hero: nombre, ciudad, somatotipo, biométricos, macros, kcal, proyección
+  3. _NUT_HTML: 7 días × 5 comidas (template string JS, línea ~1600)
+  4. _ENT_HTML: 5 días gimnasio + casa + WOD (template string JS, línea ~2000)
+  5. Suplementos: stack según perfil del cliente
+  6. Checklist: horarios y hábitos del día
+  7. Hidratación: meta de litros
+  8. Descanso: horas actuales vs meta
+  9. Motivación: frases y objetivo numérico
+  10. initHomeWorkouts(): ejercicios de los WOD con videos reales
+  ===========================================================================
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Plan Clínico BRAVE — NOMBRE CLIENTE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --azul-oscuro: #1B3A6B;
+    --azul-medio: #2E7BC4;
+    --azul-claro: #6AAFE6;
+    --gris-claro: #F2F4F7;
+    --gris-medio: #DDE3EC;
+    --blanco: #ffffff;
+    --verde: #27AE60;
+    --naranja: #E67E22;
+    --rojo: #E74C3C;
+    --texto: #12264A;
+    --texto-suave: #5A7A9F;
+    --sombra: 0 2px 12px rgba(27,58,107,0.12);
+    --sombra-hover: 0 6px 24px rgba(27,58,107,0.20);
+    --nav-w: 220px;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Barlow', sans-serif;
+    background: var(--gris-claro);
+    color: var(--texto);
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ===== NAV LATERAL ===== */
+  #nav {
+    width: var(--nav-w);
+    background: var(--azul-oscuro);
+    position: fixed;
+    top: 0; left: 0;
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 20px;
+  }
+
+  .nav-logo {
+    padding: 20px 16px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .nav-logo .brand {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    color: white;
+    letter-spacing: 1px;
+  }
+  .nav-logo .sub {
+    font-size: 10px;
+    color: rgba(255,255,255,0.45);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-top: 2px;
+  }
+  .nav-logo .cliente-tag {
+    margin-top: 10px;
+    background: rgba(46,109,164,0.4);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
+  .nav-logo .cliente-tag .nombre {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: white;
+  }
+  .nav-logo .cliente-tag .info {
+    font-size: 10px;
+    color: rgba(255,255,255,0.55);
+    margin-top: 1px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px;
+    font-weight: 500;
+    border-left: 3px solid transparent;
+    text-decoration: none;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.06); color: white; }
+  .nav-item.active {
+    background: rgba(46,109,164,0.25);
+    color: white;
+    border-left-color: var(--azul-claro);
+  }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  /* ===== MAIN ===== */
+  #main {
+    margin-left: var(--nav-w);
+    flex: 1;
+    padding: 24px;
+    max-width: calc(100vw - var(--nav-w));
+  }
+
+  .section { display:none; }
+  .section.active { display:block; animation: fadeIn 0.22s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ===== TARJETAS ===== */
+  .card {
+    background: white;
+    border-radius: 14px;
+    box-shadow: var(--sombra);
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .card-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--azul-oscuro);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title span { font-size: 20px; }
+
+  /* ===== GRID ===== */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+
+  /* ===== STAT BOX ===== */
+  .stat-box {
+    background: var(--gris-claro);
+    border-radius: 12px;
+    padding: 14px 12px;
+    text-align: center;
+  }
+  .stat-box .valor {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 28px;
+    color: var(--azul-oscuro);
+    line-height: 1;
+  }
+  .stat-box .unidad { font-size: 12px; color: var(--texto-suave); margin-top: 2px; }
+  .stat-box .label { font-size: 11px; color: var(--texto-suave); margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ===== BADGE MACRO ===== */
+  .badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .badge {
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-p { background: #EBF7EE; color: #1E8449; }
+  .badge-c { background: #FEF9E7; color: #B7770D; }
+  .badge-g { background: #FDEDEC; color: #C0392B; }
+  .badge-k { background: #EBF5FB; color: #1A5276; }
+
+  /* ===== TABS ===== */
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tab-btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: none;
+    background: var(--gris-claro);
+    color: var(--texto-suave);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Barlow', sans-serif;
+  }
+  .tab-btn.active { background: var(--azul-oscuro); color: white; }
+  .tab-content { display: none; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ===== TABLA EJERCICIOS ===== */
+  .tabla-ejercicios { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tabla-ejercicios th {
+    background: var(--azul-oscuro);
+    color: white;
+    padding: 9px 10px;
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .tabla-ejercicios td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--gris-medio);
+    vertical-align: middle;
+  }
+  .tabla-ejercicios tr:nth-child(even) td { background: #F8FAFD; }
+  .tabla-ejercicios tr:hover td { background: #EBF5FB; }
+  .yt-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #FF0000;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+  .yt-link:hover { opacity: 0.85; }
+
+  /* ===== COMIDA CARD ===== */
+  .comida-card {
+    background: var(--gris-claro);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .comida-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .comida-nombre {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--azul-oscuro);
+  }
+  .comida-hora { font-size: 11px; color: var(--texto-suave); }
+  .comida-desc { font-size: 13px; color: #444; margin-bottom: 6px; }
+
+  /* ===== HIDRATACIÓN ===== */
+  .vaso {
+    font-size: 28px;
+    cursor: pointer;
+    transition: transform 0.15s;
+    filter: grayscale(0.8);
+    display: inline-block;
+  }
+  .vaso.lleno { filter: none; transform: scale(1.1); }
+  .vaso:hover { transform: scale(1.15); }
+
+  /* ===== TIMER ===== */
+  #timer-display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 56px;
+    font-weight: 800;
+    color: var(--azul-oscuro);
+    text-align: center;
+    line-height: 1;
+  }
+  .btn-timer {
+    padding: 10px 20px;
+    border-radius: 10px;
+    border: none;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Barlow', sans-serif;
+  }
+  .btn-timer.start { background: var(--verde); color: white; }
+  .btn-timer.stop { background: var(--rojo); color: white; }
+  .btn-timer.preset { background: var(--azul-oscuro); color: white; font-size: 13px; padding: 8px 14px; }
+  .btn-timer:hover { opacity: 0.85; transform: translateY(-1px); }
+
+  /* ===== PROGRESIÓN ===== */
+  .fase-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .fase-1 { background: #EBF7EE; color: #1E8449; }
+  .fase-2 { background: #FEF9E7; color: #B7770D; }
+  .fase-3 { background: #FDEDEC; color: #C0392B; }
+
+  /* ===== SEGUIMIENTO ===== */
+  .input-field {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1.5px solid var(--gris-medio);
+    border-radius: 10px;
+    font-size: 14px;
+    font-family: 'Barlow', sans-serif;
+    color: var(--texto);
+    background: white;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-field:focus { border-color: var(--azul-medio); }
+  .label-field {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+    margin-top: 12px;
+    display: block;
+  }
+  .btn-save {
+    background: var(--azul-oscuro);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Barlow', sans-serif;
+    margin-top: 14px;
+    transition: all 0.2s;
+  }
+  .btn-save:hover { background: var(--azul-medio); }
+
+  /* ===== CHECKLIST ===== */
+  .habit-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    background: var(--gris-claro);
+    border-radius: 10px;
+    margin-bottom: 7px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .habit-item.done { background: #EBF7EE; }
+  .habit-item .check-circle {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--gris-medio);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s;
+  }
+  .habit-item.done .check-circle { background: var(--verde); border-color: var(--verde); color: white; }
+  .habit-text { font-size: 13px; font-weight: 500; }
+  .habit-item.done .habit-text { text-decoration: line-through; color: var(--texto-suave); }
+
+  /* ===== HEADER SECCIÓN ===== */
+  .section-header {
+    margin-bottom: 20px;
+  }
+  .section-header h1 {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 30px;
+    color: var(--azul-oscuro);
+    line-height: 1;
+  }
+  .section-header p { font-size: 13px; color: var(--texto-suave); margin-top: 4px; }
+
+  /* ===== SUPLEMENTO ===== */
+  .suplem-card {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px;
+    background: var(--gris-claro);
+    border-radius: 12px;
+    margin-bottom: 10px;
+  }
+  .suplem-icon { font-size: 28px; }
+  .suplem-nombre {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--azul-oscuro);
+  }
+  .suplem-dosis { font-size: 12px; color: var(--texto-suave); margin-top: 2px; }
+  .suplem-just { font-size: 12px; color: #555; margin-top: 4px; }
+
+  /* ===== MOTIVACIÓN ===== */
+  .frase-card {
+    background: linear-gradient(135deg, var(--azul-oscuro), var(--azul-medio));
+    border-radius: 16px;
+    padding: 22px 20px;
+    margin-bottom: 12px;
+    color: white;
+  }
+  .frase-card .frase {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .frase-card .autor { font-size: 12px; opacity: 0.65; }
+
+  /* ===== DESCANSO ===== */
+  .rec-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px;
+    background: var(--gris-claro);
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .rec-item .rec-icon { font-size: 22px; }
+  .rec-item .rec-titulo { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .rec-item .rec-texto { font-size: 12px; color: var(--texto-suave); }
+
+  /* ===== FOTO UPLOAD ===== */
+  .foto-zone {
+    border: 2px dashed var(--gris-medio);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .foto-zone:hover { border-color: var(--azul-medio); }
+  .foto-preview { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; margin-top: 10px; }
+
+  /* ===== EMOCIÓN ===== */
+  .emocion-btn {
+    font-size: 28px;
+    background: none;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    padding: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    filter: grayscale(0.6);
+  }
+  .emocion-btn.selected { border-color: var(--azul-medio); filter: none; background: var(--gris-claro); transform: scale(1.15); }
+
+  /* ===== HISTORIAL ===== */
+  .hist-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 1fr 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gris-medio);
+    font-size: 12px;
+  }
+
+  /* ===== SHORTCUT CARD ===== */
+  .shortcut-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sc-card {
+    background: var(--azul-oscuro);
+    border-radius: 14px;
+    padding: 16px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: white;
+  }
+  .sc-card:hover { background: var(--azul-medio); transform: translateY(-2px); }
+  .sc-icon { font-size: 28px; margin-bottom: 6px; }
+  .sc-label { font-size: 12px; font-weight: 600; }
+
+  /* ===== SVG CHARTS ===== */
+  .chart-container { background: var(--gris-claro); border-radius: 12px; padding: 16px; }
+  .chart-label { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; }
+
+  /* ===== MOBILE NAV ===== */
+  #nav-toggle {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    background: var(--azul-oscuro);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  #nav-overlay { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:99; }
+  #nav-overlay.visible { display:block; }
+
+  @media (max-width: 700px) {
+    :root { --nav-w: 0px; }
+    #nav {
+      transform: translateX(-220px);
+      width: 220px;
+      transition: transform 0.3s;
+    }
+    #nav.open { transform: translateX(0); }
+    #main { margin-left: 0; padding: 14px; padding-top: 52px; max-width: 100vw; }
+    #nav-toggle { display: block; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+    .shortcut-grid { grid-template-columns: repeat(3,1fr); }
+    .tabla-ejercicios { font-size: 11px; }
+    .tabla-ejercicios th, .tabla-ejercicios td { padding: 7px 6px; }
+    .hist-row { grid-template-columns: 70px 1fr 1fr auto; }
+  }
+
+  /* ===== FINISHER ===== */
+  .finisher-box {
+    background: linear-gradient(135deg, #1B3A6B, #2E7BC4);
+    color: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 14px;
+  }
+  .finisher-box .fin-title { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+  .finisher-box ul { padding-left: 16px; }
+  .finisher-box li { font-size: 13px; margin-bottom: 4px; opacity: 0.9; }
+
+  /* ===== PROYECCIÓN PESO ===== */
+  .proy-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .proy-table th { background: var(--azul-oscuro); color: white; padding: 8px 10px; text-align: left; font-size: 11px; text-transform: uppercase; }
+  .proy-table td { padding: 8px 10px; border-bottom: 1px solid var(--gris-medio); }
+  .proy-table tr:nth-child(even) td { background: #F8FAFD; }
+  .proy-table .meta-row td { background: #EBF7EE; font-weight: 700; color: var(--verde); }
+
+
+  .btn-duracion {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 2px solid var(--gris-medio);
+    background: white;
+    color: var(--texto);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: Barlow, sans-serif;
+    transition: all 0.2s;
+  }
+  .btn-duracion:hover { border-color: #E67E22; color: #E67E22; }
+  .btn-duracion.selected { background: #E67E22; color: white; border-color: #E67E22; }
+
+
+  /* ===== Clases generadas desde estilos inline (optimización de carga) ===== */
+  .w-47e877 { background:linear-gradient(160deg, #1B3A6B 0%, #2E7BC4 100%);border-radius:20px;padding:32px 24px 28px;margin-bottom:16px;text-align:center;position:relative;overflow:hidden; }
+  .w-5e1367 { position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,0.05); }
+  .w-79a9c3 { position:absolute;bottom:-50px;left:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.04); }
+  .w-e2ba44 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:60px;color:white;letter-spacing:6px;line-height:1; }
+  .w-3054a6 { font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;color:rgba(255,255,255,0.7);letter-spacing:4px;text-transform:uppercase;margin-top:2px; }
+  .w-1e8bbe { width:50px;height:3px;background:rgba(255,255,255,0.3);border-radius:2px;margin:16px auto; }
+  .w-5358c7 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;color:white;letter-spacing:1px; }
+  .w-382dee { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:30px;color:white;margin-top:4px; }
+  .w-85a948 { font-size:12px;color:rgba(255,255,255,0.55);margin-top:6px; }
+  .w-c282f3 { width:50px;height:2px;background:rgba(255,255,255,0.15);border-radius:2px;margin:14px auto; }
+  .w-0e3626 { display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.12);border-radius:30px;padding:8px 18px; }
+  .w-2592cc { font-size:16px; }
+  .w-200a92 { text-align:left; }
+  .w-76989c { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px;color:white; }
+  .w-b8f253 { font-size:10px;color:rgba(255,255,255,0.6);letter-spacing:0.5px; }
+  .w-8e8697 { margin-bottom:16px; }
+  .w-9cd32e { display:flex;align-items:center;gap:10px;margin-bottom:12px; }
+  .w-e5e6f8 { font-size:20px; }
+  .w-fc663b { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;color:var(--azul-oscuro); }
+  .w-b61703 { font-size:11px;color:var(--texto-suave); }
+  .w-a6d051 { border-radius:10px;padding:14px;background:var(--gris-claro); }
+  .w-d58ee8 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:28px;color:var(--azul-oscuro); }
+  .w-ea68f4 { font-size:12px;color:var(--texto-suave);margin-top:2px; }
+  .w-66fda0 { height:8px;background:var(--gris-medio);border-radius:4px;margin-top:10px;overflow:hidden; }
+  .w-b9454b { height:100%;border-radius:4px;transition:width 0.6s ease;width:0%; }
+  .w-68acf7 { display:none;margin-top:12px; }
+  .w-0eee39 { display:block;text-align:center;background:#25D366;color:white;font-weight:800;font-size:15px;padding:13px 20px;border-radius:12px;text-decoration:none;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.5px; }
+  .w-6ff293 { text-align:right;margin-top:8px; }
+  .w-26bacd { font-size:10px;color:var(--texto-suave);opacity:0.5;cursor:pointer; }
+  .w-93ff33 { display:none;margin-top:10px;background:var(--gris-claro);border-radius:10px;padding:12px; }
+  .w-16af29 { font-size:11px;color:var(--texto-suave);margin-bottom:6px; }
+  .w-adc906 { width:100%;padding:8px;border:1px solid var(--gris-medio);border-radius:8px;font-size:14px;letter-spacing:4px;text-align:center;box-sizing:border-box; }
+  .w-769bab { width:100%;margin-top:8px;padding:9px;background:var(--azul-oscuro);color:white;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer; }
+  .w-520cde { display:none;color:#C0392B;font-size:11px;margin-top:6px;text-align:center; }
+  .w-cb4589 { display:none; }
+  .w-8130ca { width:100%;padding:8px;border:1px solid var(--gris-medio);border-radius:8px;font-size:14px;box-sizing:border-box; }
+  .w-ee7dbe { width:100%;margin-top:8px;padding:9px;background:#27AE60;color:white;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer; }
+  .w-43b16e { font-size:10px;color:var(--texto-suave);margin-top:8px;line-height:1.4; }
+  .w-ca7405 { display:none;border-radius:14px;padding:18px;margin-bottom:16px;text-align:center;animation:fadeIn 0.3s ease;position:relative; }
+  .w-5e9b1a { position:absolute;top:10px;right:10px;background:rgba(255,255,255,0.25);border:none;color:white;width:26px;height:26px;border-radius:50%;font-size:14px;cursor:pointer;line-height:1; }
+  .w-b28f7f { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:26px;color:white;margin-bottom:6px; }
+  .w-a42ff6 { font-size:13px;color:rgba(255,255,255,0.9);margin-bottom:14px; }
+  .w-14c7e8 { display:inline-block;background:white;color:#E74C3C;font-weight:800;font-size:14px;padding:12px 22px;border-radius:10px;text-decoration:none;font-family:'Barlow Condensed',sans-serif;letter-spacing:0.5px; }
+  .w-49a852 { margin-bottom:14px;overflow:hidden; }
+  .w-44dd09 { background:#2E7BC4;margin:-20px -20px 16px -20px;padding:18px 20px; }
+  .w-2d33e1 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:white;letter-spacing:0.5px; }
+  .w-676d42 { font-size:11px;color:rgba(255,255,255,0.7);margin-top:2px; }
+  .w-b5ac08 { display:flex;flex-direction:column;gap:10px;margin-bottom:18px; }
+  .w-c599d5 { display:flex;gap:12px;align-items:flex-start;background:#F0F4FF;border-radius:10px;padding:12px; }
+  .w-a58eac { width:32px;height:32px;border-radius:8px;background:#1B3A6B;color:white;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;font-family:'Barlow Condensed',sans-serif; }
+  .w-1de9b4 { font-weight:700;font-size:13px;color:var(--azul-oscuro);margin-bottom:2px; }
+  .w-919a09 { font-size:12px;color:#555;line-height:1.5; }
+  .w-0f66b7 { display:flex;gap:12px;align-items:flex-start;background:#FFF0F6;border-radius:10px;padding:12px; }
+  .w-5591bd { width:32px;height:32px;border-radius:8px;background:#2E7BC4;color:white;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;font-family:'Barlow Condensed',sans-serif; }
+  .w-71c3cc { display:flex;gap:12px;align-items:flex-start;background:#FFF8EC;border-radius:10px;padding:12px; }
+  .w-890328 { width:32px;height:32px;border-radius:8px;background:#E67E22;color:white;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;font-family:'Barlow Condensed',sans-serif; }
+  .w-ef791d { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--texto-suave);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px; }
+  .w-261896 { display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px; }
+  .w-19c332 { background:white;border-radius:14px;padding:16px;box-shadow:var(--sombra);display:flex;align-items:center;gap:12px; }
+  .w-8897c9 { width:44px;height:44px;border-radius:12px;background:#EBF5FB;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0; }
+  .w-2b7ef6 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:26px;color:var(--azul-oscuro);line-height:1; }
+  .w-d1d553 { font-size:13px;font-weight:600;color:var(--texto-suave); }
+  .w-471547 { font-size:11px;color:var(--texto-suave);font-weight:600;text-transform:uppercase;letter-spacing:0.5px; }
+  .w-9088b3 { background:#FDEDEC;border-radius:14px;padding:16px;box-shadow:var(--sombra);display:flex;align-items:center;gap:12px; }
+  .w-f938b4 { width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.7);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0; }
+  .w-eabc9b { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:26px;color:#C0392B;line-height:1; }
+  .w-e4e660 { font-size:13px;font-weight:600; }
+  .w-3a8945 { font-size:11px;color:#C0392B;font-weight:700;text-transform:uppercase;letter-spacing:0.5px; }
+  .w-64aae0 { background:var(--azul-oscuro);border-radius:16px;padding:20px;margin-bottom:14px;box-shadow:var(--sombra); }
+  .w-e980f6 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:rgba(255,255,255,0.5);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px; }
+  .w-c59ad0 { display:flex;align-items:center;gap:6px; }
+  .w-028784 { flex:1;text-align:center; }
+  .w-86e92f { font-size:10px;color:rgba(255,255,255,0.5);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px; }
+  .w-15da6c { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:26px;color:rgba(255,255,255,0.75);line-height:1; }
+  .w-9e966e { font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px; }
+  .w-41df13 { color:rgba(255,255,255,0.3);font-size:18px;font-weight:300; }
+  .w-6a46de { flex:1;text-align:center;background:rgba(255,255,255,0.1);border-radius:12px;padding:10px 6px; }
+  .w-20d6cd { font-size:10px;color:rgba(255,255,255,0.6);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px; }
+  .w-d568a8 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:30px;color:#7FD49A;line-height:1; }
+  .w-98e828 { font-size:10px;color:#7FD49A;margin-top:2px;font-weight:700; }
+  .w-553a64 { margin-top:14px; }
+  .w-da5480 { background:white;border-radius:16px;padding:20px;margin-bottom:14px;box-shadow:var(--sombra); }
+  .w-4b0703 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--texto-suave);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px; }
+  .w-041f29 { display:flex;align-items:center;gap:20px; }
+  .w-5cd105 { flex-shrink:0; }
+  .w-da5cd6 { flex:1; }
+  .w-a7409f { margin-bottom:10px; }
+  .w-6c142d { display:flex;justify-content:space-between;align-items:center;margin-bottom:3px; }
+  .w-8f40ea { font-size:12px;font-weight:700;color:#27AE60; }
+  .w-57af88 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;color:#27AE60; }
+  .w-a6e3cb { height:5px;background:#EBF7EE;border-radius:3px; }
+  .w-d4e4fb { width:32%;height:100%;background:#27AE60;border-radius:3px; }
+  .w-e3a83a { font-size:12px;font-weight:700;color:#E67E22; }
+  .w-3fe064 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;color:#E67E22; }
+  .w-8586ad { height:5px;background:#FEF9E7;border-radius:3px; }
+  .w-386a1a { width:35%;height:100%;background:#E67E22;border-radius:3px; }
+  .w-eaaf76 { font-size:12px;font-weight:700;color:#E74C3C; }
+  .w-ca4045 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;color:#E74C3C; }
+  .w-c72ee5 { height:5px;background:#FDEDEC;border-radius:3px; }
+  .w-7be20c { width:33%;height:100%;background:#E74C3C;border-radius:3px; }
+  .w-8575b2 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--texto-suave);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px; }
+  .w-607e78 { font-size:12px;color:var(--texto-suave);margin-bottom:14px; }
+  .w-a0a071 { display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px; }
+  .w-821486 { background:var(--gris-claro);border-radius:10px;padding:10px;text-align:center; }
+  .w-069ce0 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:#27AE60; }
+  .w-8f43e2 { font-size:10px;color:var(--texto-suave);font-weight:600; }
+  .w-889626 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:#2E7BC4; }
+  .w-ad8fdb { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:var(--azul-oscuro); }
+  .w-3cc446 { display:flex;align-items:center;gap:10px;margin-bottom:14px; }
+  .w-bf5003 { background:#2E7BC4;color:white;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;padding:6px 12px;border-radius:20px;letter-spacing:0.5px; }
+  .w-6fa039 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;color:var(--azul-oscuro); }
+  .w-35e630 { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+  .w-6a30ba { font-size:11px;font-weight:700;color:var(--texto-suave);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px; }
+  .w-b3aa8e { display:flex;align-items:flex-start;gap:6px;margin-bottom:6px; }
+  .w-8fde6f { font-size:12px;flex-shrink:0; }
+  .w-5ff8d6 { font-size:12px;color:#444;line-height:1.4; }
+  .w-bdce4b { color:#2E7BC4;font-size:12px;flex-shrink:0;font-weight:700; }
+  .w-b8d74b { background:var(--gris-medio);color:var(--texto);margin-top:10px; }
+  .w-a88b85 { background:var(--azul-oscuro);color:white;margin-bottom:18px; }
+  .w-242599 { display:flex;flex-wrap:wrap;gap:12px;align-items:center; }
+  .w-13076d { text-align:center; }
+  .w-ebc1ca { font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800; }
+  .w-761df0 { font-size:10px;opacity:0.7; }
+  .w-d5b425 { width:1px;height:40px;background:rgba(255,255,255,0.2); }
+  .w-6a75d8 { font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800;color:#7FD49A; }
+  .w-dd6801 { font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800;color:#F7CA4E; }
+  .w-e09b63 { font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800;color:#F48F8F; }
+  .w-b44d7b { display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px; }
+  .w-255943 { background:#EBF5FB;color:var(--azul-oscuro);padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700; }
+  .w-3c0acc { background:#FEF9E7;color:#B7770D;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700; }
+  .w-d923a5 { background:#EBF7EE;border:1.5px solid #A9DFBF; }
+  .w-c5ffe3 { font-size:13px;color:#555; }
+  .w-54f21a { display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px; }
+  .w-690740 { display:flex;align-items:center;gap:14px;flex-wrap:wrap; }
+  .w-177333 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:36px;color:var(--azul-oscuro); }
+  .w-e62b8a { font-size:14px;color:var(--texto-suave); }
+  .w-092e70 { font-size:13px;color:var(--texto-suave); }
+  .w-0a1895 { height:8px;background:var(--gris-medio);border-radius:4px;margin-top:12px;overflow:hidden; }
+  .w-64962a { height:100%;width:0%;background:var(--azul-medio);border-radius:4px;transition:width 0.4s ease; }
+  .w-886d92 { background:var(--gris-medio);color:var(--texto);margin-top:12px;font-size:13px; }
+  .w-450632 { background:linear-gradient(135deg,#1B3A6B,#2E7BC4);color:white; }
+  .w-d99303 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:36px; }
+  .w-aa80b3 { font-size:13px;opacity:0.8;margin-top:4px; }
+  .w-a4fc60 { background:white;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:var(--sombra); }
+  .w-3a38eb { position:relative;padding-bottom:4px; }
+  .w-5bfe5b { position:absolute;top:16px;left:16px;right:16px;height:2px;background:var(--gris-medio);z-index:0; }
+  .w-0fda2e { display:grid;grid-template-columns:repeat(4,1fr);gap:6px;position:relative;z-index:1; }
+  .w-d14221 { width:32px;height:32px;border-radius:50%;background:#27AE60;color:white;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px; }
+  .w-e349fd { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;color:#27AE60;margin-bottom:5px; }
+  .w-357570 { background:#EBF7EE;border-radius:8px;padding:8px 4px; }
+  .w-8728c0 { font-size:10px;color:#555;line-height:1.8; }
+  .w-502c9b { width:32px;height:32px;border-radius:50%;background:#E67E22;color:white;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px; }
+  .w-89e336 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;color:#E67E22;margin-bottom:5px; }
+  .w-2388ed { background:#FEF9E7;border-radius:8px;padding:8px 4px; }
+  .w-14b049 { width:32px;height:32px;border-radius:50%;background:#E74C3C;color:white;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px; }
+  .w-332f3a { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;color:#E74C3C;margin-bottom:5px; }
+  .w-48da45 { background:#FDEDEC;border-radius:8px;padding:8px 4px; }
+  .w-c311d0 { width:32px;height:32px;border-radius:50%;background:#1B3A6B;color:white;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px; }
+  .w-282c27 { font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;color:#1B3A6B;margin-bottom:5px; }
+  .w-7b153c { background:#EBF5FB;border-radius:8px;padding:8px 4px; }
+  .w-c06a4b { display:flex;gap:8px;justify-content:center;margin:14px 0;flex-wrap:wrap; }
+  .w-88d7db { display:flex;gap:10px;justify-content:center; }
+  .w-e41e3b { margin-top:12px;height:6px;background:var(--gris-medio);border-radius:3px;overflow:hidden; }
+  .w-c2fbf6 { height:100%;width:100%;background:var(--azul-medio);border-radius:3px;transition:width 1s linear; }
+  .w-4ad06f { display:flex;gap:10px;flex-wrap:wrap; }
+  .w-d1c4d3 { font-size:13px;color:var(--texto-suave);margin-top:10px; }
+  .w-6d0184 { font-size:11px;font-weight:700;color:var(--texto-suave);margin-bottom:6px;text-transform:uppercase; }
+  .w-fcc53c { font-size:24px; }
+  .w-12f095 { font-size:11px;color:var(--texto-suave);margin-top:6px; }
+  .w-e3f8e3 { color:var(--texto-suave);font-size:13px;padding:10px 0; }
+  .w-18035b { background:#FDEDEC;color:#C0392B;margin-top:10px;font-size:12px; }
+  .w-c319b5 { display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px; }
+  .w-9c6869 { display:flex;gap:8px; }
+  .w-8632c1 { white-space:nowrap;margin-top:0; }
+  .w-2bb6a2 { background:linear-gradient(135deg, #27AE60, #1E8449); }
+  .w-a5064a { background:linear-gradient(135deg, #2E7BC4, #1B3A6B); }
+  .w-e295cd { background:linear-gradient(135deg, #E67E22, #CA6F1E); }
+  .w-e1c299 { background:linear-gradient(135deg, #8E44AD, #6C3483); }
+  .w-64c423 { text-align:center;padding:20px; }
+  .w-21972d { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:26px;color:var(--azul-oscuro); }
+  .w-f63ceb { font-size:14px;color:var(--texto-suave);margin-top:6px;margin-bottom:16px; }
+  .w-c695b9 { background:var(--azul-oscuro);color:white; }
+  .w-110840 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;margin-bottom:10px; }
+  .w-16e1cf { font-size:13px;opacity:0.8;margin-bottom:4px; }
+  .w-74105d { font-size:13px;opacity:0.8; }
+  .w-0fc548 { background:#EBF5FB;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--azul-oscuro); }
+  .w-06aaee { border-left:4px solid var(--azul-medio); }
+  .w-6654aa { background:var(--gris-claro);border-radius:10px;padding:10px;margin-top:10px; }
+  .w-1e93f9 { font-size:12px;font-weight:700;margin-bottom:4px; }
+  .w-dc1110 { background:#F3EEFE;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#6C3483; }
+  .w-658e3d { background:#EAFAF3;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#1E8449; }
+  .w-233589 { background:#FEF3E7;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#B7770D; }
+  .w-0bbfe2 { background:#FDEDF3;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#B7295A; }
+  .w-831cc4 { background:#FEF9E7;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#B7770D; }
+  .w-cf3a02 { background:#EBF5FB;border-radius:10px;padding:10px 14px;margin-bottom:12px; }
+  .w-0cf08e { font-size:14px; }
+  .w-df74e8 { overflow-x:auto; }
+  .w-9ae459 { background:#F3EEFE;border-radius:10px;padding:10px 14px;margin-bottom:12px; }
+  .w-d053ca { background:#EAFAF3;border-radius:10px;padding:10px 14px;margin-bottom:12px; }
+  .w-4a0c4d { font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:#1E8449;margin-bottom:8px; }
+  .w-ee1a6b { margin:20px 0 12px; }
+  .w-c917d6 { font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#E74C3C;letter-spacing:1px; }
+  .w-71253f { font-size:12px;color:var(--texto-suave);margin-top:4px; }
+  .w-d1ff04 { display:grid;grid-template-columns:repeat(2,1fr);gap:8px; }
+  .w-fe8d96 { font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#2E7BC4;letter-spacing:1px; }
+  .w-c0cd77 { background:#EBF5FB;border-radius:10px;padding:12px 14px;margin-top:10px; }
+  .w-2abe35 { font-size:12px;color:var(--azul-oscuro); }
+  .w-f0a2e3 { background:#FEF3E7;border-radius:10px;padding:10px 14px;margin-bottom:12px; }
+  .w-3dc0d5 { font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:#B7770D;margin-bottom:8px; }
+  .w-33ebdb { font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:#B7770D;margin:16px 0 8px; }
+  .w-29bab7 { background:#FDEDF3;border-radius:10px;padding:10px 14px;margin-bottom:12px; }
+  .w-75b2c4 { font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:#B7295A;margin-bottom:8px; }
+  .w-6544ad { font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#B7295A;letter-spacing:1px; }
+  .w-3fb15c { background:#FDEDF3;border-radius:10px;padding:12px 14px;margin-top:10px; }
+  .w-f58005 { font-size:12px;color:#B7295A; }
+  .w-b51f1a { background:#FEF9E7;border-radius:10px;padding:16px;text-align:center; }
+  .w-ab3728 { font-size:32px;margin-bottom:8px; }
+  .w-09dd34 { font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:#B7770D; }
+  .w-179927 { font-size:13px;color:#888;margin-top:6px; }
+  .w-129757 { background:#EBF5FB;border-radius:10px;padding:16px;text-align:center; }
+  .w-d3cbb7 { background:var(--gris-claro);border-radius:10px;padding:12px;margin-bottom:12px; }
+  .w-0b10e5 { font-size:11px;font-weight:700;color:var(--texto-suave);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px; }
+  .w-813505 { display:flex;justify-content:space-between;align-items:center;margin-top:6px; }
+  .w-7b9ae0 { font-size:13px;font-weight:800;color:'+trend+'; }
+  .w-9022c6 { display:grid;grid-template-columns:85px 1fr 1fr 1fr;gap:6px;align-items:center;padding:9px 0;border-bottom:1px solid var(--gris-medio);font-size:12px; }
+  .w-cd701c { font-weight:700;color:var(--azul-oscuro); }
+  .w-10d198 { color:var(--texto-suave);font-size:13px; }
+  .w-ec4460 { background:#EBF7EE;border-radius:10px;padding:8px 12px;font-size:12px;display:flex;gap:8px;align-items:center; }
+  .w-a118c3 { background:none;border:none;cursor:pointer;color:#C0392B;font-size:14px;padding:0; }
+
+  /* Logo BRAVE */
+  .w-logocard { display:inline-block;background:white;border-radius:16px;padding:14px 18px;margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,0.18); }
+  .w-logoimg { display:block;height:48px;width:auto; }
+
+  /* ===================== ENTRENO EN CASA / AIRE LIBRE ===================== */
+  .casa-card {
+    margin-top: 18px;
+    border: 2px dashed var(--verde);
+    border-radius: 14px;
+    background: #F4FBF6;
+    overflow: hidden;
+  }
+  .casa-toggle-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 16px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+  .casa-toggle-btn .casa-tit {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 17px;
+    color: var(--verde);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .casa-toggle-btn .casa-chevron {
+    font-size: 14px;
+    color: var(--verde);
+    transition: transform 0.2s ease;
+  }
+  .casa-card.open .casa-chevron { transform: rotate(180deg); }
+  .casa-body { display: none; padding: 0 16px 18px; }
+  .casa-card.open .casa-body { display: block; }
+  .casa-sub {
+    font-size: 12.5px;
+    color: var(--texto-suave);
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  .casa-ej-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .casa-ej-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: white;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    box-shadow: 0 1px 4px rgba(27,58,107,0.06);
+  }
+  .casa-ej-item .ce-nom { font-weight: 700; color: var(--azul-oscuro); }
+  .casa-ej-item .ce-mus { font-size: 11px; color: var(--texto-suave); margin-top: 2px; }
+  .casa-ej-item .ce-srs {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    color: var(--verde);
+    white-space: nowrap;
+  }
+
+  /* Mini-timer de descanso embebido dentro de cada casa-card */
+  .casa-timer-box {
+    background: white;
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    margin-bottom: 6px;
+  }
+  .casa-timer-box .ct-display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 34px;
+    color: var(--azul-oscuro);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .casa-timer-box .ct-presets { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .casa-timer-box .ct-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .casa-timer-box .ct-btn.preset { background: var(--gris-claro); color: var(--azul-oscuro); }
+  .casa-timer-box .ct-btn.start { background: var(--verde); color: white; }
+  .casa-timer-box .ct-btn.stop { background: #FBEAEA; color: #C0392B; }
+  .casa-timer-box .ct-actions { display: flex; gap: 8px; justify-content: center; }
+
+  /* ===================== WOD — versión casa con timer AMRAP/EMOM ===================== */
+  .wod-box {
+    background: linear-gradient(135deg, var(--azul-oscuro), var(--azul-medio));
+    border-radius: 14px;
+    padding: 18px;
+    color: white;
+    margin-bottom: 14px;
+  }
+  .wod-box .wod-tag {
+    display: inline-block;
+    background: rgba(255,255,255,0.18);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .wod-box .wod-tit { font-family:'Barlow Condensed', sans-serif; font-weight: 800; font-size: 20px; margin-bottom: 4px; }
+  .wod-box .wod-desc { font-size: 12.5px; opacity: 0.85; margin-bottom: 14px; line-height: 1.4; }
+
+  /* Panel del ejercicio EN CURSO — lo más prominente de la caja */
+  .wod-ejercicio-actual {
+    background: rgba(255,255,255,0.12);
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    margin-bottom: 12px;
+  }
+  .wod-ejercicio-actual .wod-fase {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    opacity: 0.75;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .wod-ejercicio-actual .wod-ej-nombre {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    line-height: 1.15;
+    margin-bottom: 4px;
+  }
+  .wod-ejercicio-actual .wod-ej-reps {
+    font-size: 14px;
+    font-weight: 700;
+    color: #FFE9A8;
+    margin-bottom: 10px;
+  }
+  .wod-ejercicio-actual .wod-ej-yt {
+    display: inline-block;
+    background: #E74C3C;
+    color: white;
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 800;
+    border-radius: 8px;
+    padding: 8px 16px;
+  }
+  .wod-box .wod-display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 52px;
+    text-align: center;
+    line-height: 1;
+    margin-bottom: 14px;
+  }
+  .wod-box .wod-actions { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
+  .wod-box .wb-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .wod-box .wb-btn.start { background: var(--verde); color: white; }
+  .wod-box .wb-btn.stop { background: rgba(255,255,255,0.15); color: white; }
+
+  /* Lista completa de ejercicios del WOD, siempre visible debajo, con su propio video */
+  .wod-ronda-list { display: flex; flex-direction: column; gap: 6px; }
+  .wod-ronda-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+  }
+  .wod-ronda-item .wr-num {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 6px;
+    padding: 2px 7px;
+    min-width: 26px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .wod-ronda-item .wr-ex { flex: 1; min-width: 0; }
+  .wod-ronda-item .wr-nom { font-weight: 700; }
+  .wod-ronda-item .wr-reps { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+  .wod-ronda-item .wr-yt {
+    flex-shrink: 0;
+    background: #E74C3C;
+    color: white;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 800;
+    border-radius: 6px;
+    padding: 5px 9px;
+    white-space: nowrap;
+  }
+  .wod-ronda-item.activa { background: rgba(255,255,255,0.25); }
+  @media (max-width: 480px) {
+    .wod-box .wod-display { font-size: 44px; }
+    .wod-ejercicio-actual .wod-ej-nombre { font-size: 19px; }
+  }
+</style>
+
+<script id="home-workout-engine">
+/* ===================== MOTOR ENTRENO EN CASA — toggle + timers independientes ===================== */
+function toggleCasa(id) {
+  const card = document.getElementById(id);
+  if (card) card.classList.toggle('open');
+}
+
+/* Mini-timers de descanso para la versión casa (independientes del timer global de Atajos) */
+const _casaTimers = {};
+function casaSetTimer(id, seg) {
+  let t = _casaTimers[id] || (_casaTimers[id] = {});
+  clearInterval(t.interval); t.interval = null;
+  t.total = seg; t.remaining = seg;
+  casaUpdateDisplay(id);
+  const barra = document.getElementById('casa-barra-'+id);
+  if (barra) barra.style.width = '100%';
+}
+function casaUpdateDisplay(id) {
+  const t = _casaTimers[id]; if (!t) return;
+  const m = Math.floor(t.remaining/60); const s = t.remaining % 60;
+  const disp = document.getElementById('casa-display-'+id);
+  if (disp) disp.textContent = m+':'+(s<10?'0':'')+s;
+}
+function casaStartTimer(id) {
+  let t = _casaTimers[id] || (_casaTimers[id] = {total:60, remaining:60});
+  const btn = document.getElementById('casa-btn-'+id);
+  if (t.interval) {
+    clearInterval(t.interval); t.interval = null;
+    if (typeof liberarWakeLock === 'function') liberarWakeLock();
+    if (btn) btn.textContent = '▶ Iniciar';
+    return;
+  }
+  if (t.remaining <= 0) t.remaining = t.total;
+  if (btn) btn.textContent = '⏸ Pausar';
+  if (typeof despertarAudio === 'function') despertarAudio();
+  if (typeof sonidoInicioTimer === 'function') sonidoInicioTimer();
+  if (typeof solicitarWakeLock === 'function') solicitarWakeLock();
+  t.interval = setInterval(() => {
+    t.remaining--;
+    casaUpdateDisplay(id);
+    const barra = document.getElementById('casa-barra-'+id);
+    if (barra) barra.style.width = ((t.remaining/t.total)*100)+'%';
+    if (t.remaining > 0 && t.remaining <= 3 && typeof sonidoCuentaAtras === 'function') sonidoCuentaAtras();
+    if (t.remaining <= 0) {
+      clearInterval(t.interval); t.interval = null;
+      if (typeof liberarWakeLock === 'function') liberarWakeLock();
+      if (btn) btn.textContent = '▶ Iniciar';
+      if (typeof sonidoFinTimer === 'function') sonidoFinTimer();
+      if ('vibrate' in navigator) navigator.vibrate([300,100,300]);
+    }
+  }, 1000);
+}
+function casaResetTimer(id) {
+  const t = _casaTimers[id]; if (!t) return;
+  clearInterval(t.interval); t.interval = null;
+  if (typeof liberarWakeLock === 'function') liberarWakeLock();
+  t.remaining = t.total;
+  casaUpdateDisplay(id);
+  const barra = document.getElementById('casa-barra-'+id);
+  if (barra) barra.style.width = '100%';
+  const btn = document.getElementById('casa-btn-'+id);
+  if (btn) btn.textContent = '▶ Iniciar';
+}
+
+/* ===== MOTOR WOD — AMRAP / EMOM con rondas para versión casa/aire libre ===== */
+const _wodState = {};
+function wodInit(id, ejercicios, segPorRonda) {
+  _wodState[id] = { ejercicios, segPorRonda, rondaActual: 0, remaining: segPorRonda, interval: null, corriendo: false };
+  wodRenderRondas(id);
+  wodMostrarEjercicio(id, 0, 'LISTA PARA EMPEZAR');
+}
+function wodRenderRondas(id) {
+  const st = _wodState[id]; if (!st) return;
+  const cont = document.getElementById('wod-rondas-'+id);
+  if (!cont) return;
+  let html = '';
+  for (let i = 0; i < st.ejercicios.length; i++) {
+    const ej = st.ejercicios[i];
+    html += '<div class="wod-ronda-item" id="wod-r-'+id+'-'+i+'">'
+      + '<div class="wr-num">'+(i+1)+'</div>'
+      + '<div class="wr-ex"><div class="wr-nom">'+ej.nombre+'</div><div class="wr-reps">'+ej.reps+'</div></div>'
+      + '<a class="wr-yt" href="'+ej.yt+'" target="_blank" onclick="event.stopPropagation()">▶ Ver</a>'
+      + '</div>';
+  }
+  cont.innerHTML = html;
+}
+function wodMostrarEjercicio(id, idx, faseLabel) {
+  const st = _wodState[id]; if (!st) return;
+  const ej = st.ejercicios[idx];
+  const nomEl = document.getElementById('wod-ejercicio-nombre-'+id);
+  const repsEl = document.getElementById('wod-ejercicio-reps-'+id);
+  const ytEl = document.getElementById('wod-ejercicio-yt-'+id);
+  if (nomEl) nomEl.textContent = ej.nombre;
+  if (repsEl) repsEl.textContent = ej.reps;
+  if (ytEl) ytEl.href = ej.yt;
+  const faseEl = document.getElementById('wod-fase-'+id);
+  if (faseEl) faseEl.textContent = faseLabel;
+}
+function wodUpdateDisplay(id, segundos) {
+  const m = Math.floor(segundos/60); const s = segundos % 60;
+  const disp = document.getElementById('wod-display-'+id);
+  if (disp) disp.textContent = m+':'+(s<10?'0':'')+s;
+}
+function wodToggle(id) {
+  const st = _wodState[id]; if (!st) return;
+  const btn = document.getElementById('wod-btn-'+id);
+  if (st.corriendo) {
+    clearInterval(st.interval); st.interval = null; st.corriendo = false;
+    if (typeof liberarWakeLock === 'function') liberarWakeLock();
+    if (btn) btn.textContent = '▶ Iniciar WOD';
+    return;
+  }
+  st.corriendo = true;
+  if (btn) btn.textContent = '⏸ Pausar';
+  if (typeof despertarAudio === 'function') despertarAudio();
+  if (typeof sonidoInicioTimer === 'function') sonidoInicioTimer();
+  if (typeof solicitarWakeLock === 'function') solicitarWakeLock();
+  document.querySelectorAll('[id^="wod-r-'+id+'-"]').forEach(el => el.classList.remove('activa'));
+  const activo = document.getElementById('wod-r-'+id+'-'+st.rondaActual);
+  if (activo) activo.classList.add('activa');
+  wodMostrarEjercicio(id, st.rondaActual, 'EJERCICIO '+(st.rondaActual+1)+' / '+st.ejercicios.length);
+  wodUpdateDisplay(id, st.remaining);
+  st.interval = setInterval(() => {
+    st.remaining--;
+    wodUpdateDisplay(id, Math.max(st.remaining,0));
+    if (st.remaining > 0 && st.remaining <= 3 && typeof sonidoCuentaAtras === 'function') sonidoCuentaAtras();
+    if (st.remaining <= 0) {
+      st.rondaActual++;
+      if (st.rondaActual >= st.ejercicios.length) {
+        clearInterval(st.interval); st.interval = null; st.corriendo = false;
+        if (typeof liberarWakeLock === 'function') liberarWakeLock();
+        if (btn) btn.textContent = '✅ Ronda Completada — Repetir';
+        if (typeof sonidoFinTimer === 'function') sonidoFinTimer();
+        if ('vibrate' in navigator) navigator.vibrate([300,100,300,100,300]);
+        const faseEl = document.getElementById('wod-fase-'+id);
+        if (faseEl) faseEl.textContent = '🏆 ¡RONDA COMPLETA! Descansa 60 seg y repite';
+        document.querySelectorAll('[id^="wod-r-'+id+'-"]').forEach(el => el.classList.remove('activa'));
+        return;
+      }
+      document.querySelectorAll('[id^="wod-r-'+id+'-"]').forEach(el => el.classList.remove('activa'));
+      const sig = document.getElementById('wod-r-'+id+'-'+st.rondaActual);
+      if (sig) sig.classList.add('activa');
+      st.remaining = st.segPorRonda;
+      wodMostrarEjercicio(id, st.rondaActual, 'EJERCICIO '+(st.rondaActual+1)+' / '+st.ejercicios.length);
+      if (typeof sonidoInicioTimer === 'function') sonidoInicioTimer();
+    }
+  }, 1000);
+}
+function wodReset(id) {
+  const st = _wodState[id]; if (!st) return;
+  clearInterval(st.interval); st.interval = null; st.corriendo = false;
+  if (typeof liberarWakeLock === 'function') liberarWakeLock();
+  st.rondaActual = 0; st.remaining = st.segPorRonda;
+  document.querySelectorAll('[id^="wod-r-'+id+'-"]').forEach(el => el.classList.remove('activa'));
+  wodMostrarEjercicio(id, 0, 'LISTA PARA EMPEZAR');
+  wodUpdateDisplay(id, st.segPorRonda);
+  const btn = document.getElementById('wod-btn-'+id);
+  if (btn) btn.textContent = '▶ Iniciar WOD';
+}
+function initHomeWorkouts() {
+  // ⚠️ INYECTAR: ejercicios reales del cliente para los WOD de mié y vie
+  // Formato: {nombre:'EMOJI Nombre del ejercicio', reps:'X repeticiones', yt:'https://youtube.com/...'}
+  wodInit('mie', [
+    {nombre:'EJERCICIO 1', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 2', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 3', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 4', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 5', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+  ], 40); // 40 = segundos por ejercicio
+  wodInit('vie', [
+    {nombre:'EJERCICIO 1', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 2', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 3', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 4', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+    {nombre:'EJERCICIO 5', reps:'X repeticiones', yt:'https://www.youtube.com/results?search_query=EJERCICIO+tecnica'},
+  ], 40);
+}
+</script>
+
+</head>
+<body>
+
+<button id="nav-toggle" onclick="toggleNav()">☰</button>
+<div id="nav-overlay" onclick="closeNav()"></div>
+
+<!-- NAV LATERAL -->
+<nav id="nav">
+  <div class="nav-logo">
+    <div class="brand">BRAVE</div>
+    <div class="sub">Salud & Rendimiento</div>
+    <div class="cliente-tag">
+      <div class="nombre">NOMBRE CLIENTE</div>
+      <div class="info">SOMATOTIPO · OBJETIVO · EDAD</div>
+    </div>
+  </div>
+  <a class="nav-item active" onclick="showSection('inicio')">    <span class="icon">🏠</span> Inicio</a>
+  <a class="nav-item" onclick="showSection('atajos')">           <span class="icon">⚡</span> Atajos</a>
+  <a class="nav-item" onclick="showSection('nutricion')">        <span class="icon">🥗</span> Nutrición</a>
+  <a class="nav-item" onclick="showSection('suplementos')">      <span class="icon">💊</span> Suplementos</a>
+  <a class="nav-item" onclick="showSection('hidratacion')">      <span class="icon">💧</span> Hidratación</a>
+  <a class="nav-item" onclick="showSection('descanso')">         <span class="icon">😴</span> Descanso</a>
+  <a class="nav-item" onclick="showSection('entreno')">          <span class="icon">💪</span> Entreno</a>
+  <a class="nav-item" onclick="showSection('seguimiento')">      <span class="icon">📊</span> Seguimiento</a>
+  <a class="nav-item" onclick="showSection('motivacion')">       <span class="icon">🔥</span> Motivación</a>
+</nav>
+
+<!-- MAIN -->
+<main id="main">
+
+<!-- ===== 1. INICIO ===== -->
+<section id="inicio" class="section active">
+
+  <!-- ===== ACCESO DIRECTO — arriba de todo, bien visible ===== -->
+  <!-- Colores: azul para clientes hombres, cambia a var(--rosa) / #C2185B para clientas mujeres -->
+  <div style="display:flex;gap:10px;margin-bottom:14px">
+    <button onclick="showSection('entreno')" style="flex:1;border:none;cursor:pointer;background:linear-gradient(135deg,#1A2F5A,#2E6DA4);color:white;border-radius:16px;padding:18px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(26,47,90,0.35)">
+      <span style="font-size:26px">💪</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;letter-spacing:0.5px">ENTRENAMIENTO</span>
+    </button>
+    <button onclick="showSection('nutricion')" style="flex:1;border:none;cursor:pointer;background:linear-gradient(135deg,#2E6DA4,#4FA8E0);color:white;border-radius:16px;padding:18px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(46,109,164,0.35)">
+      <span style="font-size:26px">🥗</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;letter-spacing:0.5px">NUTRICIÓN</span>
+    </button>
+  </div>
+
+  <!-- ===== HERO REDISEÑADO ===== -->
+
+  <!-- 1. PORTADA -->
+  <div class="w-47e877">
+    <div class="w-5e1367"></div>
+    <div class="w-79a9c3"></div>
+    <div class="w-logocard">
+      <img src="data:image/webp;base64,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dGlmZjpCaXRzUGVyU2FtcGxlPgogIDx0aWZmOllDYkNyU3ViU2FtcGxpbmc+CiAgIDxyZGY6U2VxPgogICAgPHJkZjpsaT4yPC9yZGY6bGk+CiAgICA8cmRmOmxpPjI8L3JkZjpsaT4KICAgPC9yZGY6U2VxPgogIDwvdGlmZjpZQ2JDclN1YlNhbXBsaW5nPgogPC9yZGY6RGVzY3JpcHRpb24+CjwvcmRmOlJERj4KPC94OnhtcG1ldGE+CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCjw/eHBhY2tldCBlbmQ9J3cnPz4A" alt="BRAVE Salud & Rendimiento" class="w-logoimg">
+    </div>
+    <div class="w-3054a6">Salud & Rendimiento</div>
+    <div class="w-1e8bbe"></div>
+    <div class="w-5358c7">Programa Personalizado</div>
+    <div class="w-382dee">NOMBRE CLIENTE</div>
+    <div class="w-85a948">CIUDAD · SOMATOTIPO · AÑO</div>
+    <div class="w-c282f3"></div>
+    <div class="w-0e3626">
+      <span class="w-2592cc">🏅</span>
+      <div class="w-200a92">
+        <div class="w-76989c">Coach Will</div>
+        <div class="w-b8f253">Certificado por el COCED</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. STATS BIOMÉTRICOS — cards con icono y color semántico -->
+  <!-- ESTADO PLAN AUTOMÁTICO -->
+  <div class="card w-8e8697" id="estado-plan-card">
+    <div class="w-9cd32e">
+      <span class="w-e5e6f8">📋</span>
+      <div>
+        <div class="w-fc663b">Plan Activo · BRV-2026-XXX</div>
+        <div class="w-b61703">DD de mes de YYYY → DD de mes de YYYY · 30 días</div>
+      </div>
+    </div>
+    <div class="w-a6d051" id="plan-estado-box">
+      <div class="w-d58ee8" id="plan-dias-texto">Calculando...</div>
+      <div class="w-ea68f4" id="plan-vence-texto"></div>
+      <div class="w-66fda0">
+        <div class="w-b9454b" id="plan-barra"></div>
+      </div>
+    </div>
+    <div class="w-68acf7" id="plan-wa-btn">
+      <a class="w-0eee39" id="plan-wa-link" href="" target="_blank">
+        💬 HABLAR CON COACH WILL
+      </a>
+    </div>
+
+    <!-- Ajuste de fecha (solo coach) — discreto, protegido por PIN -->
+    <div class="w-6ff293">
+      <span class="w-26bacd" onclick="abrirAjusteFecha()">⚙️ Ajustar</span>
+    </div>
+    <div class="w-93ff33" id="panel-ajuste-fecha">
+      <div id="ajuste-paso-pin">
+        <div class="w-16af29">PIN del coach</div>
+        <input class="w-adc906" type="password" id="ajuste-pin-input" maxlength="4" inputmode="numeric" placeholder="••••">
+        <button class="w-769bab" onclick="verificarPinAjuste()">Verificar</button>
+        <div class="w-520cde" id="ajuste-pin-error">PIN incorrecto</div>
+      </div>
+      <div class="w-cb4589" id="ajuste-paso-fecha">
+        <div class="w-16af29">Nueva fecha de inicio del ciclo (cuando pagó/volvió)</div>
+        <input class="w-8130ca" type="date" id="ajuste-fecha-input">
+        <button class="w-ee7dbe" onclick="guardarAjusteFecha()">Guardar y recalcular</button>
+        <div class="w-43b16e">A partir de esta fecha, el plan vuelve a renovarse solo cada 30 días, sin que tengas que tocar nada más.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BANNER URGENTE -->
+  <div class="w-ca7405" id="banner-vencimiento">
+    <button class="w-5e9b1a" onclick="document.getElementById('banner-vencimiento').style.display='none'" title="Quitar aviso">✕</button>
+    <div class="w-b28f7f" id="banner-titulo"></div>
+    <div class="w-a42ff6" id="banner-subtitulo"></div>
+    <a class="w-14c7e8" id="banner-wa-link" href="" target="_blank">
+      💬 HABLAR CON COACH WILL AHORA
+    </a>
+  </div>
+
+  <!-- TARJETA PLAN DE ENTRENAMIENTO — HERO -->
+  <div class="card w-49a852">
+    <!-- Header degradado -->
+    <div class="w-44dd09">
+      <div class="w-2d33e1">⚡ ESTRUCTURA DEL PLAN</div>
+      <div class="w-676d42">5 días/semana · Gimnasio completo · Foco: según objetivo del cliente</div>
+    </div>
+
+    <!-- Bloques A/B/C -->
+    <div class="w-b5ac08">
+      <div class="w-c599d5">
+        <div class="w-a58eac">A</div>
+        <div>
+          <div class="w-1de9b4">Musculación por grupo</div>
+          <div class="w-919a09">SPLIT DEL CLIENTE · Carga progresiva · 50–60 min por sesión</div>
+        </div>
+      </div>
+      <div class="w-0f66b7">
+        <div class="w-5591bd">B</div>
+        <div>
+          <div class="w-1de9b4">DÍA ESPECIAL — NOMBRE_DÍA</div>
+          <div class="w-919a09">DESCRIPCIÓN DEL DÍA ESPECIAL · Cierre semanal</div>
+        </div>
+      </div>
+      <div class="w-71c3cc">
+        <div class="w-890328">C</div>
+        <div>
+          <div class="w-1de9b4">Descanso Activo</div>
+          <div class="w-919a09">Sábado: activo opcional · Domingo: descanso total · Recuperación según objetivo</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline de progresión -->
+    <div class="w-ef791d">📈 Progresión mensual</div>
+
+    
+  </div>
+
+  <div class="w-261896">
+    <div class="w-19c332">
+      <div class="w-8897c9">⚖️</div>
+      <div>
+        <div class="w-2b7ef6">XX<span class="w-d1d553"> kg</span></div>
+        <div class="w-471547">Peso actual</div>
+      </div>
+    </div>
+    <div class="w-19c332">
+      <div class="w-8897c9">📏</div>
+      <div>
+        <div class="w-2b7ef6">XXX<span class="w-d1d553"> cm</span></div>
+        <div class="w-471547">Talla</div>
+      </div>
+    </div>
+    <div class="w-9088b3">
+      <div class="w-f938b4">🎯</div>
+      <div>
+        <div class="w-eabc9b">XX.X<span class="w-e4e660"> IMC</span></div>
+        <div class="w-3a8945">CLASIFICACIÓN IMC</div>
+      </div>
+    </div>
+    <div class="w-19c332">
+      <div class="w-8897c9">🎂</div>
+      <div>
+        <div class="w-2b7ef6">XX<span class="w-d1d553"> años</span></div>
+        <div class="w-471547">Edad</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. CALORÍAS — card horizontal con flujo TMB → GET → META -->
+  <div class="w-64aae0">
+    <div class="w-e980f6">Balance Energético Diario</div>
+    <div class="w-c59ad0">
+      <div class="w-028784">
+        <div class="w-86e92f">TMB</div>
+        <div class="w-15da6c">X,XXX</div>
+        <div class="w-9e966e">kcal base</div>
+      </div>
+      <div class="w-41df13">→</div>
+      <div class="w-028784">
+        <div class="w-86e92f">GET</div>
+        <div class="w-15da6c">X,XXX</div>
+        <div class="w-9e966e">kcal activo</div>
+      </div>
+      <div class="w-41df13">→</div>
+      <div class="w-6a46de">
+        <div class="w-20d6cd">META</div>
+        <div class="w-d568a8">X,XXX</div>
+        <div class="w-98e828">±XXX kcal</div>
+      </div>
+    </div>
+    <!-- Mini gráfica de barras SVG -->
+    <svg class="w-553a64" width="100%" viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg">
+      <!-- Barra TMB -->
+      <rect x="30" y="50" width="60" height="70" rx="6" fill="rgba(255,255,255,0.2)"/>
+      <text x="60" y="44" text-anchor="middle" font-size="11" font-weight="700" fill="rgba(255,255,255,0.6)" font-family="Barlow Condensed,sans-serif">TMB</text>
+      <text x="60" y="94" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.4)" font-family="Barlow,sans-serif">TMB</text>
+      <!-- Barra GET -->
+      <rect x="120" y="16" width="60" height="104" rx="6" fill="rgba(255,255,255,0.25)"/>
+      <text x="150" y="10" text-anchor="middle" font-size="11" font-weight="700" fill="rgba(255,255,255,0.6)" font-family="Barlow Condensed,sans-serif">GET</text>
+      <text x="150" y="94" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.4)" font-family="Barlow,sans-serif">GET</text>
+      <!-- Barra META -->
+      <rect x="210" y="33" width="60" height="87" rx="6" fill="#27AE60"/>
+      <text x="240" y="27" text-anchor="middle" font-size="11" font-weight="700" fill="#7FD49A" font-family="Barlow Condensed,sans-serif">META</text>
+      <text x="240" y="94" text-anchor="middle" font-size="10" fill="#7FD49A" font-family="Barlow,sans-serif">META</text>
+    </svg>
+  </div>
+
+  <!-- 4. MACROS — Donut SVG + leyenda -->
+  <div class="w-da5480">
+    <div class="w-4b0703">Distribución de Macros</div>
+    <div class="w-041f29">
+      <!-- Donut -->
+      <div class="w-5cd105">
+        <svg width="140" height="140" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 70 70 L 70.0 12.0 A 58 58 0 0 1 124.3 91.2 Z" fill="#27AE60"/>
+          <path d="M 70 70 L 124.3 91.2 A 58 58 0 0 1 23.6 100.5 Z" fill="#E67E22"/>
+          <path d="M 70 70 L 23.6 100.5 A 58 58 0 0 1 70.0 12.0 Z" fill="#E74C3C"/>
+          <!-- Hueco central -->
+          <circle cx="70" cy="70" r="36" fill="white"/>
+          <text x="70" y="66" text-anchor="middle" font-size="10" fill="var(--texto-suave)" font-family="Barlow,sans-serif">Total</text>
+          <text x="70" y="80" text-anchor="middle" font-size="14" font-weight="800" fill="var(--azul-oscuro)" font-family="Barlow Condensed,sans-serif">X,XXX</text>
+          <text x="70" y="92" text-anchor="middle" font-size="9" fill="var(--texto-suave)" font-family="Barlow,sans-serif">kcal</text>
+        </svg>
+      </div>
+      <!-- Leyenda -->
+      <div class="w-da5cd6">
+        <div class="w-a7409f">
+          <div class="w-6c142d">
+            <span class="w-8f40ea">● Proteína XX%</span>
+            <span class="w-57af88">XXXg</span>
+          </div>
+          <div class="w-a6e3cb"><div class="w-d4e4fb"></div></div>
+        </div>
+        <div class="w-a7409f">
+          <div class="w-6c142d">
+            <span class="w-e3a83a">● Carbos XX%</span>
+            <span class="w-3fe064">XXXg</span>
+          </div>
+          <div class="w-8586ad"><div class="w-386a1a"></div></div>
+        </div>
+        <div>
+          <div class="w-6c142d">
+            <span class="w-eaaf76">● Grasas XX%</span>
+            <span class="w-ca4045">XXg</span>
+          </div>
+          <div class="w-c72ee5"><div class="w-7be20c"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. PROYECCIÓN — gráfica de línea SVG -->
+  <div class="w-da5480">
+    <div class="w-8575b2">Proyección de Ganancia Muscular · 4 meses</div>
+    <div class="w-607e78">Déficit o superávit según objetivo · Meta de peso/composición en X meses</div>
+    <svg width="100%" viewBox="0 0 300 110" xmlns="http://www.w3.org/2000/svg">
+      <!-- ⚠️ INYECTAR: ajustar puntos según si el cliente sube (superávit) o baja (déficit) -->
+      <!-- SUBE (superávit/ganar músculo): Y grande a Y pequeño de izq a der -->
+      <!-- BAJA (déficit/perder grasa): Y pequeño a Y grande de izq a der -->
+      <!-- Ejemplo SUBE 53→57kg: polyline y círculos en Y=76,62,48,34,20 -->
+      <!-- Ejemplo BAJA 98→90kg: polyline y círculos en Y=20,34,48,62,76 -->
+      <polyline points="20,48 85,48 150,48 215,48 280,48" fill="none" stroke="#2E7BC4" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="20" cy="48" r="5" fill="#2E7BC4" stroke="white" stroke-width="2"/>
+      <text x="20" y="39" text-anchor="middle" font-size="9" fill="#2E7BC4" font-weight="700" font-family="Barlow Condensed,sans-serif">Hoy</text>
+      <circle cx="85" cy="48" r="5" fill="#2E7BC4" stroke="white" stroke-width="2"/>
+      <circle cx="150" cy="48" r="5" fill="#2E7BC4" stroke="white" stroke-width="2"/>
+      <circle cx="215" cy="48" r="5" fill="#2E7BC4" stroke="white" stroke-width="2"/>
+      <circle cx="280" cy="48" r="5" fill="#2E7BC4" stroke="white" stroke-width="2"/>
+      <text x="280" y="39" text-anchor="middle" font-size="9" fill="#2E7BC4" font-weight="700" font-family="Barlow Condensed,sans-serif">Meta</text>
+      <!-- Labels meses -->
+      <text x="20"  y="106" text-anchor="middle" font-size="9" fill="var(--texto-suave)" font-family="Barlow,sans-serif">Hoy</text>
+      <text x="85"  y="106" text-anchor="middle" font-size="9" fill="var(--texto-suave)" font-family="Barlow,sans-serif">Mes 1</text>
+      <text x="150" y="106" text-anchor="middle" font-size="9" fill="var(--texto-suave)" font-family="Barlow,sans-serif">Mes 2</text>
+      <text x="215" y="106" text-anchor="middle" font-size="9" fill="var(--texto-suave)" font-family="Barlow,sans-serif">Mes 3</text>
+      <text x="280"  y="106" text-anchor="middle" font-size="9" fill="#2E7BC4" font-weight="700" font-family="Barlow,sans-serif">Mes 4</text>
+    </svg>
+    <!-- Métricas meta -->
+    <div class="w-a0a071">
+      <div class="w-821486">
+        <div class="w-069ce0">±X kg</div>
+        <div class="w-8f43e2">En X meses</div>
+      </div>
+      <div class="w-821486">
+        <div class="w-889626">XX kg</div>
+        <div class="w-8f43e2">Meta final</div>
+      </div>
+      <div class="w-821486">
+        <div class="w-ad8fdb">X.XL</div>
+        <div class="w-8f43e2">Agua/día</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. PERFIL SOMATOTIPO — dos columnas compactas -->
+  <div class="w-da5480">
+    <div class="w-3cc446">
+      <div class="w-bf5003">SOMATOTIPO</div>
+      <div class="w-6fa039">ESTRATEGIA</div>
+    </div>
+    <div class="w-35e630">
+      <div>
+        <div class="w-6a30ba">Características</div>
+        <!-- ⚠️ INYECTAR: características del somatotipo del cliente -->
+        <div class="w-b3aa8e"><span class="w-8fde6f">🔴</span><span class="w-5ff8d6">CARACTERÍSTICA 1</span></div>
+        <div class="w-b3aa8e"><span class="w-8fde6f">🟡</span><span class="w-5ff8d6">CARACTERÍSTICA 2</span></div>
+        <div class="w-b3aa8e"><span class="w-8fde6f">🟢</span><span class="w-5ff8d6">CARACTERÍSTICA 3</span></div>
+        <div class="w-b3aa8e"><span class="w-8fde6f">🟢</span><span class="w-5ff8d6">CARACTERÍSTICA 4</span></div>
+      </div>
+      <div>
+        <div class="w-6a30ba">Estrategia BRAVE</div>
+        <!-- ⚠️ INYECTAR: estrategia específica para el somatotipo del cliente -->
+        <div class="w-b3aa8e"><span class="w-bdce4b">→</span><span class="w-5ff8d6">ESTRATEGIA 1</span></div>
+        <div class="w-b3aa8e"><span class="w-bdce4b">→</span><span class="w-5ff8d6">ESTRATEGIA 2</span></div>
+        <div class="w-b3aa8e"><span class="w-bdce4b">→</span><span class="w-5ff8d6">ESTRATEGIA 3</span></div>
+        <div class="w-b3aa8e"><span class="w-bdce4b">→</span><span class="w-5ff8d6">ESTRATEGIA 4</span></div>
+      </div>
+    </div>
+  </div>
+
+</section>
+<section id="atajos" class="section">
+  <div class="section-header">
+    <h1>⚡ Atajos del Día</h1>
+    <p>Acceso rápido, checklist diario y timer de series</p>
+  </div>
+
+  <!-- Shortcuts -->
+  <div class="card">
+    <div class="card-title"><span>🗂️</span> Ir a sección</div>
+    <div class="shortcut-grid">
+      <div class="sc-card" onclick="showSection('nutricion')"><div class="sc-icon">🥗</div><div class="sc-label">Nutrición</div></div>
+      <div class="sc-card" onclick="showSection('entreno')"><div class="sc-icon">💪</div><div class="sc-label">Entreno</div></div>
+      <div class="sc-card" onclick="showSection('hidratacion')"><div class="sc-icon">💧</div><div class="sc-label">Hidratación</div></div>
+      <div class="sc-card" onclick="showSection('suplementos')"><div class="sc-icon">💊</div><div class="sc-label">Suplementos</div></div>
+      <div class="sc-card" onclick="showSection('seguimiento')"><div class="sc-icon">📊</div><div class="sc-label">Seguimiento</div></div>
+      <div class="sc-card" onclick="showSection('motivacion')"><div class="sc-icon">🔥</div><div class="sc-label">Motivación</div></div>
+    </div>
+  </div>
+
+  <!-- Timer -->
+
+<!-- Checklist -->
+  <div class="card">
+    <div class="card-title"><span>✅</span> Checklist Diario</div>
+    <div id="checklist">
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+              <div class="habit-text">🌅 Desayuno completo (HORA)</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">💊 Suplementos de la mañana</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">🍎 Snack mañana (HORA)</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">🥘 Almuerzo completo (HORA)</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">🏋️ Sesión de entrenamiento del día</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">🥛 Merienda (HORA)</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">💧 Tomé X litros de agua hoy</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">🌙 Cena (HORA)</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">💊 Suplementos nocturnos</div>
+      </div>
+      <div class="habit-item" onclick="toggleHabit(this)">
+        <div class="check-circle"></div>
+        <div class="habit-text">😴 En cama antes de las HORA (meta: X–X h de sueño)</div>
+      </div>
+    </div>
+    <button class="btn-save w-b8d74b" onclick="resetChecklist()">🔄 Reiniciar Checklist</button>
+  </div>
+</section>
+
+<!-- ===== 3. NUTRICIÓN ===== -->
+<section id="nutricion" class="section">
+  <div class="section-header">
+    <h1>🥗 Plan Nutricional</h1>
+    <p>7 días × 5 comidas · X,XXX kcal · Comida real · Porciones en gramos y medidas caseras</p>
+  </div>
+
+  <div class="card w-a88b85">
+    <div class="w-242599">
+      <div class="w-13076d"><div class="w-ebc1ca">X,XXX</div><div class="w-761df0">KCAL/DÍA</div></div>
+      <div class="w-d5b425"></div>
+      <div class="w-13076d"><div class="w-6a75d8">XXXg</div><div class="w-761df0">PROTEÍNA</div></div>
+      <div class="w-13076d"><div class="w-dd6801">XXXg</div><div class="w-761df0">CARBS</div></div>
+      <div class="w-13076d"><div class="w-e09b63">XXg</div><div class="w-761df0">GRASAS</div></div>
+    </div>
+  </div>
+
+  <!-- Leyenda dias -->
+  <div class="w-b44d7b">
+    <span class="w-255943">💪 Lun-Vie = ~X,XXX kcal · objetivo del cliente</span>
+    <span class="w-3c0acc">😴 Sáb/Dom = ~X,XXX kcal · descanso</span>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('nut','lun',this)">Lun · DÍA 1</button>
+      <button class="tab-btn" onclick="switchTab('nut','mar',this)">Mar · DÍA 2</button>
+      <button class="tab-btn" onclick="switchTab('nut','mie',this)">Mié · DÍA 3</button>
+      <button class="tab-btn" onclick="switchTab('nut','jue',this)">Jue · DÍA 4</button>
+      <button class="tab-btn" onclick="switchTab('nut','vie',this)">Vie · DÍA 5</button>
+      <button class="tab-btn" onclick="switchTab('nut','sab',this)">Sáb 🚶</button>
+      <button class="tab-btn" onclick="switchTab('nut','dom',this)">Dom 😴</button>
+    </div>
+
+    <!-- LUNES - entreno -->
+    <div id="nut-lazy-container"></div>
+  </div>
+
+  <!-- Tips prácticos -->
+  <div class="card">
+    <div class="card-title"><span>⚖️</span> Reglas de Oro — Porciones y Cocina</div>
+    <div class="rec-item"><div class="rec-icon">📏</div><div><div class="rec-titulo">Pesa la proteína cruda, los carbos cocidos</div><div class="rec-texto">El pollo y la carne se pesan crudos (pierden ~30% en cocción). El arroz, quinoa y pasta se miden cocidos ya servidos en el plato.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🍳</div><div><div class="rec-titulo">Métodos de cocción permitidos</div><div class="rec-texto">Plancha, horno, vapor, hervido, salteado con máximo 1 cucharadita de aceite. Cero frituras, cero apanados, cero salsas empacadas.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🏪</div><div><div class="rec-titulo">Si comes por fuera</div><div class="rec-texto">Pide: pollo o res a la plancha + arroz o ensalada. Sin salsas. Evita las frituras. La mayoría de restaurantes lo tienen. No hay excusa.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🚫</div><div><div class="rec-titulo">Qué eliminar completamente</div><div class="rec-texto">Gaseosas, jugos de caja, alcohol entre semana, pan blanco, salsas tipo mayonesa o tomate de paquete, frituras, embutidos (chorizo, salchicha).</div></div></div>
+    <div class="rec-item"><div class="rec-icon">✅</div><div><div class="rec-titulo">Condimentos libres (sin calorías)</div><div class="rec-texto">Limón, vinagre, mostaza sin azúcar, ajo, cebolla, cilantro, tomillo, orégano, pimienta, sal con moderación, stevia.</div></div></div>
+  </div>
+</section>
+
+<!-- ===== 4. SUPLEMENTOS ===== -->
+<section id="suplementos" class="section">
+  <div class="section-header">
+    <h1>💊 Stack de Suplementos</h1>
+    <p>Protocolo BRAVE personalizado según el perfil del cliente</p>
+  </div>
+  <div class="card">
+    <!-- ⚠️ INYECTAR: Agregar una suplem-card por suplemento del cliente -->
+    <!-- EJEMPLO DE FORMATO: -->
+    <div class="suplem-card">
+      <div class="suplem-icon">🥤</div>
+      <div>
+        <div class="suplem-nombre">NOMBRE SUPLEMENTO</div>
+        <div class="suplem-dosis">⏱ DOSIS · MOMENTO DEL DÍA</div>
+        <div class="suplem-just">JUSTIFICACIÓN CLÍNICA PARA ESTE CLIENTE</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>📅</span> Horario Diario de Suplementos</div>
+    <!-- ⚠️ INYECTAR: rec-item por cada momento del día con suplementos -->
+    <div class="rec-item"><div class="rec-icon">🌅</div><div><div class="rec-titulo">HORA — Momento</div><div class="rec-texto">SUPLEMENTOS DE ESE MOMENTO</div></div></div>
+  </div>
+  <div class="card w-d923a5">
+    <div class="card-title"><span>⚠️</span> Importante</div>
+    <p class="w-c5ffe3">Los suplementos son complemento de la alimentación real, no su reemplazo. Consulta con tu coach antes de iniciar cualquier suplemento.</p>
+  </div>
+</section>
+
+<!-- ===== 5. HIDRATACIÓN ===== -->
+<section id="hidratacion" class="section">
+  <div class="section-header">
+    <h1>💧 Hidratación</h1>
+    <p>Meta diaria: X.X L de agua · según peso del cliente</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>🥤</span> Contador de Vasos de Agua</div>
+    <p class="w-607e78">Cada vaso = 250ml · Meta: XX vasos/día · Toca para marcar (1 vaso = 250ml)</p>
+    <div class="w-54f21a" id="vasos-container">
+    </div>
+    <div class="w-690740">
+      <div>
+        <span class="w-177333" id="vasos-count">0</span>
+        <span class="w-e62b8a"> / XX vasos</span>
+      </div>
+      <div class="w-092e70" id="agua-ml">0 ml / X,XXX ml</div>
+    </div>
+    <div class="w-0a1895">
+      <div class="w-64962a" id="agua-progreso"></div>
+    </div>
+    <button class="btn-save w-886d92" onclick="resetAgua()">🔄 Reiniciar</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>🕐</span> Protocolo de Hidratación</div>
+    <div class="rec-item"><div class="rec-icon">🌅</div><div><div class="rec-titulo">Al despertar</div><div class="rec-texto">500 ml. Activa el metabolismo, hidrata tras el ayuno nocturno.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">☕</div><div><div class="rec-titulo">Mañana (desayuno-snack)</div><div class="rec-texto">500 ml. Con las comidas y entre ellas.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🏋️</div><div><div class="rec-titulo">Durante el entrenamiento</div><div class="rec-texto">400-500 ml. Sorbos pequeños cada 15 min. Mantente hidratada durante todo el entreno.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🔄</div><div><div class="rec-titulo">Tarde (almuerzo-merienda)</div><div class="rec-texto">500 ml. Post-entrenamiento y tarde.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🌙</div><div><div class="rec-titulo">Noche (cena-antes de dormir)</div><div class="rec-texto">400 ml máximo. Evitar más para no interrumpir el sueño.</div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>🍃</span> Qué Priorizar y Qué Evitar</div>
+    <div class="rec-item"><div class="rec-icon">✅</div><div><div class="rec-titulo">Agua pura</div><div class="rec-texto">Prioridad total. Agua de manantial de Boyacá si es posible.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🍵</div><div><div class="rec-titulo">Agua de hierbas</div><div class="rec-texto">Té verde, agua de albahaca o manzanilla. Sin azúcar.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🚫</div><div><div class="rec-titulo">Evitar</div><div class="rec-texto">Gaseosas, jugos azucarados, bebidas energizantes, alcohol.</div></div></div>
+  </div>
+</section>
+
+<!-- ===== 6. DESCANSO ===== -->
+<section id="descanso" class="section">
+  <div class="section-header">
+    <h1>😴 Descanso y Recuperación</h1>
+    <p>El sueño es cuando el cuerpo quema grasa activamente</p>
+  </div>
+  <div class="card w-450632">
+    <div class="w-d99303">X–X HORAS</div>
+    <div class="w-aa80b3">de sueño por noche · Meta del cliente · Horas actuales vs recomendadas</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>🌙</span> Protocolo de Sueño</div>
+    <div class="rec-item"><div class="rec-icon">🌙</div><div><div class="rec-titulo">Apagarse antes de 22:30</div><div class="rec-texto">El sueño antes de medianoche es el más regenerativo (fase REM profunda).</div></div></div>
+    <div class="rec-item"><div class="rec-icon">📵</div><div><div class="rec-titulo">Sin pantallas 1 hora antes</div><div class="rec-texto">La luz azul de dispositivos bloquea la melatonina hasta en un 50%.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🌡️</div><div><div class="rec-titulo">Habitación fresca y oscura</div><div class="rec-texto">Temperatura ideal 17-19°C. Boyacá tiene el clima perfecto para dormir profundo.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🕯️</div><div><div class="rec-titulo">Rutina de relajación</div><div class="rec-texto">Estiramientos 10 min, respiración profunda o lectura ligera antes de dormir.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🥗</div><div><div class="rec-titulo">Cena 2-3 horas antes</div><div class="rec-texto">No comer justo antes de dormir. Cena a las 18:30, durmiendo idealmente antes de las 22:30.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">💊</div><div><div class="rec-titulo">Magnesio Glicinato antes de dormir</div><div class="rec-texto">Mejora la calidad del sueño y la recuperación muscular nocturna — Prioridad según el cliente. El músculo crece en el sueño — sin descanso real no hay ganancia ni pérdida de grasa sostenida.</div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>🔄</span> Recuperación Muscular Activa</div>
+    <div class="rec-item"><div class="rec-icon">🚶</div><div><div class="rec-titulo">Sábado — Caminata activa</div><div class="rec-texto">30-45 minutos a paso moderado. Activa circulación, reduce DOMS (dolor muscular tardío), sin carga sobre articulaciones.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🧘</div><div><div class="rec-titulo">Domingo — Movilidad y stretching</div><div class="rec-texto">20-30 min de movilidad articular y estiramientos globales. Foco en caderas, hombros, espalda baja.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🧊</div><div><div class="rec-titulo">Post-entreno intenso — Contraste térmico</div><div class="rec-texto">Tras piernas o HIIT: ducha fría 2 min al final. Reduce inflamación, acelera recuperación. Especialmente útil Miércoles y Viernes.</div></div></div>
+    <div class="rec-item"><div class="rec-icon">🫙</div><div><div class="rec-titulo">Foam Roller — Liberación miofascial</div><div class="rec-texto">5-10 min post-sesión o antes de dormir. Cuádriceps, isquiotibiales, espalda. Reduce tensión acumulada por musculación.</div></div></div>
+  </div>
+</section>
+
+<!-- ===== 7. ENTRENO ===== -->
+<section id="entreno" class="section">
+  <div class="section-header">
+    <h1>💪 Plan de Entreno</h1>
+    <p>5 días/semana · Gimnasio completo · Versión en casa/aire libre · OBJETIVO</p>
+  </div>
+
+  <!-- Progresión periódica -->
+    <!-- TIMELINE PROGRESIÓN -->
+  <div class="w-a4fc60">
+    <div class="w-4b0703">📈 Progresión Mensual</div>
+    <div class="w-3a38eb">
+      <div class="w-5bfe5b"></div>
+      <div class="w-0fda2e">
+
+        <div class="w-13076d">
+          <div class="w-d14221">1</div>
+          <div class="w-e349fd">ADAPTACIÓN</div>
+          <div class="w-357570">
+            <div class="w-8728c0">Carga moderada<br>12–15 reps<br>60–75 seg desc.<br>WOD 2 rondas</div>
+          </div>
+        </div>
+
+        <div class="w-13076d">
+          <div class="w-502c9b">2</div>
+          <div class="w-89e336">DESARROLLO</div>
+          <div class="w-2388ed">
+            <div class="w-8728c0">Sube 5–10%<br>10–12 reps<br>60 seg desc.<br>WOD 3 rondas</div>
+          </div>
+        </div>
+
+        <div class="w-13076d">
+          <div class="w-14b049">3</div>
+          <div class="w-332f3a">INTENSIDAD</div>
+          <div class="w-48da45">
+            <div class="w-8728c0">Superseries<br>10–12 reps<br>45 seg desc.<br>WOD 4 rondas</div>
+          </div>
+        </div>
+
+        <div class="w-13076d">
+          <div class="w-c311d0">4</div>
+          <div class="w-282c27">PICO</div>
+          <div class="w-7b153c">
+            <div class="w-8728c0">Máxima carga<br>8–10 reps<br>45 seg desc.<br>WOD máximo</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<div class="card">
+    <div class="card-title"><span>⏱️</span> Timer de Descanso entre Series</div>
+    <div id="timer-circle-wrap" style="position:relative;width:240px;height:240px;margin:10px auto">
+      <svg width="240" height="240" viewBox="0 0 240 240" style="transform:rotate(-90deg)">
+        <circle cx="120" cy="120" r="106" fill="none" stroke="var(--gris-medio)" stroke-width="14"/>
+        <circle id="timer-ring" cx="120" cy="120" r="106" fill="none" stroke="var(--azul-medio)" stroke-width="14" stroke-linecap="round" stroke-dasharray="666.13" stroke-dashoffset="0" style="transition:stroke-dashoffset 1s linear"/>
+      </svg>
+      <div id="timer-display" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">1:00</div>
+    </div>
+    <div class="w-c06a4b">
+      <button class="btn-timer preset" onclick="setTimer(45)">45 seg</button>
+      <button class="btn-timer preset" onclick="setTimer(60)">60 seg</button>
+      <button class="btn-timer preset" onclick="setTimer(75)">75 seg</button>
+      <button class="btn-timer preset" onclick="setTimer(90)">90 seg</button>
+    </div>
+    <div class="w-88d7db">
+      <button class="btn-timer start" id="btn-start" onclick="startTimer()">▶ Iniciar</button>
+      <button class="btn-timer stop" onclick="resetTimer()">✕ Reset</button>
+    </div>
+  </div>
+
+  <!-- NOTA: --azul-medio en el stroke del círculo es el color de acento del timer.
+       Para clientas con paleta rosa/fucsia, cambia stroke="var(--azul-medio)" por stroke="var(--rosa)" (o el nombre de variable de acento que uses). -->
+
+  
+  <div id="ent-lazy-container"></div>
+</section>
+
+<!-- ===== 8. SEGUIMIENTO ===== -->
+<section id="seguimiento" class="section">
+  <div class="section-header">
+    <h1>📊 Seguimiento</h1>
+    <p>Registra tu progreso — los datos no mienten</p>
+  </div>
+
+  <!-- Estado emocional -->
+  <div class="card">
+    <div class="card-title"><span>💭</span> Estado Emocional Hoy</div>
+    <div class="w-4ad06f" id="emocion-btns">
+      <button class="emocion-btn" onclick="setEmocion(this,'😫')">😫</button>
+      <button class="emocion-btn" onclick="setEmocion(this,'😔')">😔</button>
+      <button class="emocion-btn" onclick="setEmocion(this,'😐')">😐</button>
+      <button class="emocion-btn" onclick="setEmocion(this,'😊')">😊</button>
+      <button class="emocion-btn" onclick="setEmocion(this,'🔥')">🔥</button>
+    </div>
+    <div class="w-d1c4d3" id="emocion-texto">Toca para registrar cómo te sientes hoy</div>
+  </div>
+
+  <!-- Fotos de progreso -->
+  <div class="card">
+    <div class="card-title"><span>📸</span> Fotos de Progreso</div>
+    <div class="grid-3">
+      <div>
+        <div class="w-6d0184">Frontal</div>
+        <div class="foto-zone" onclick="document.getElementById('foto-front').click()">
+          <div class="w-fcc53c">📷</div>
+          <div class="w-12f095">Toca para subir</div>
+          <img class="foto-preview w-cb4589" id="preview-front">
+        </div>
+        <input class="w-cb4589" type="file" id="foto-front" accept="image/*" onchange="previewFoto('foto-front','preview-front','front')">
+      </div>
+      <div>
+        <div class="w-6d0184">Lateral</div>
+        <div class="foto-zone" onclick="document.getElementById('foto-lat').click()">
+          <div class="w-fcc53c">📷</div>
+          <div class="w-12f095">Toca para subir</div>
+          <img class="foto-preview w-cb4589" id="preview-lat">
+        </div>
+        <input class="w-cb4589" type="file" id="foto-lat" accept="image/*" onchange="previewFoto('foto-lat','preview-lat','lat')">
+      </div>
+      <div>
+        <div class="w-6d0184">Posterior</div>
+        <div class="foto-zone" onclick="document.getElementById('foto-post').click()">
+          <div class="w-fcc53c">📷</div>
+          <div class="w-12f095">Toca para subir</div>
+          <img class="foto-preview w-cb4589" id="preview-post">
+        </div>
+        <input class="w-cb4589" type="file" id="foto-post" accept="image/*" onchange="previewFoto('foto-post','preview-post','post')">
+      </div>
+    </div>
+  </div>
+
+  <!-- Registro de medidas -->
+  <div class="card">
+    <div class="card-title"><span>📏</span> Registro de Medidas</div>
+    <div class="grid-2">
+      <div>
+        <label class="label-field">⚖️ Peso (kg)</label>
+        <input type="number" id="med-peso" class="input-field" placeholder="105.0" step="0.1">
+        <label class="label-field">📏 Cintura (cm)</label>
+        <input type="number" id="med-cintura" class="input-field" placeholder="105" step="0.5">
+        <label class="label-field">📐 Cadera (cm)</label>
+        <input type="number" id="med-cadera" class="input-field" placeholder="100" step="0.5">
+      </div>
+      <div>
+        <label class="label-field">💪 Pecho (cm)</label>
+        <input type="number" id="med-pecho" class="input-field" placeholder="100" step="0.5">
+        <label class="label-field">💪 Brazo izq. (cm)</label>
+        <input type="number" id="med-brazo" class="input-field" placeholder="35" step="0.5">
+        <label class="label-field">🦵 Muslo (cm)</label>
+        <input type="number" id="med-muslo" class="input-field" placeholder="60" step="0.5">
+      </div>
+    </div>
+    <button class="btn-save" onclick="guardarMedidas()">💾 Guardar registro</button>
+  </div>
+
+  <!-- Historial -->
+  <div class="card">
+    <div class="card-title"><span>📈</span> Historial de Registros</div>
+    <div id="historial-container">
+      <div class="w-e3f8e3">Aún no hay registros guardados. Empieza a registrar tu progreso.</div>
+    </div>
+    <button class="btn-save w-18035b" onclick="limpiarHistorial()">🗑 Limpiar historial</button>
+  </div>
+
+  <!-- Notas del coach -->
+  <div class="card">
+    <div class="card-title"><span>📝</span> Notas del Coach</div>
+    <textarea id="notas-coach" class="input-field" rows="4" placeholder="Coach Will escribirá aquí las observaciones de tu proceso..."></textarea>
+    <button class="btn-save" onclick="guardarNotas()">💾 Guardar notas</button>
+  </div>
+
+  <!-- Logros -->
+  <div class="card">
+    <div class="card-title"><span>🏆</span> Mis Logros</div>
+    <div class="w-c319b5" id="logros-container"></div>
+    <div class="w-9c6869">
+      <input class="input-field w-da5cd6" type="text" id="nuevo-logro" placeholder="Ej: Hice 10 dominadas sin asistencia...">
+      <button class="btn-save w-8632c1" onclick="agregarLogro()">+ Logro</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 9. MOTIVACIÓN ===== -->
+<section id="motivacion" class="section">
+  <div class="section-header">
+    <h1>🔥 Motivación</h1>
+    <p>NOMBRE, esto es para ti</p>
+  </div>
+  <!-- ⚠️ INYECTAR: 4-5 frase-card con frases personalizadas al cliente -->
+  <div class="frase-card">
+    <div class="frase">"FRASE MOTIVACIONAL PRINCIPAL PARA ESTE CLIENTE"</div>
+    <div class="autor">— Para NOMBRE, con propósito</div>
+  </div>
+  <div class="frase-card w-2bb6a2">
+    <div class="frase">"FRASE 2"</div>
+    <div class="autor">— Coach Will, BRAVE</div>
+  </div>
+  <div class="frase-card w-a5064a">
+    <div class="frase">"FRASE 3"</div>
+    <div class="autor">— Principio BRAVE</div>
+  </div>
+  <div class="frase-card w-e1c299">
+    <div class="frase">"No estás solo/a. Estás respaldado/a por BRAVE Salud &amp; Rendimiento."</div>
+    <div class="autor">— BRAVE Salud &amp; Rendimiento</div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>🎯</span> Tu Objetivo Claro</div>
+    <div class="w-64c423">
+      <div class="w-21972d">DE XX A XX KG</div>
+      <div class="w-f63ceb">OBJETIVO CLÍNICO DEL CLIENTE</div>
+      <div class="grid-3">
+        <div class="stat-box"><div class="valor">±X kg</div><div class="unidad">por mes</div><div class="label">progreso</div></div>
+        <div class="stat-box"><div class="valor">±X kg</div><div class="unidad">meta total</div><div class="label">X meses</div></div>
+        <div class="stat-box"><div class="valor">5/5</div><div class="unidad">días entreno</div><div class="label">consistencia 💯</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card w-c695b9">
+    <div class="w-110840">📌 Tu Compromiso Semanal</div>
+    <div class="w-16e1cf">X entrenamientos · 35 comidas reales · XX litros de agua · objetivo calórico, cada día</div>
+  </div>
+  <div class="card w-c695b9">
+    <div class="w-110840">📞 Coach Will — BRAVE</div>
+    <div class="w-16e1cf">brave-salud.com</div>
+    <div class="w-74105d">Tu coach siempre está disponible para ajustar el plan</div>
+  </div>
+</section>
+
+</main>
+
+<script>
+
+  // ===== LAZY RENDER =====
+  const _lazyRendered = {};
+  const _NUT_HTML = `
+    <!-- ⚠️ INYECTAR: 7 días de nutrición usando el formato de abajo -->
+    <!-- FORMATO DE UN DÍA: -->
+    <div id="nut-lun" class="tab-content active">
+      <div class="w-0fc548">
+        💪 <strong>Lunes — Entreno: DÍA 1</strong> · ~X,XXX kcal
+      </div>
+
+      <div class="comida-card w-06aaee">
+        <div class="comida-header"><div class="comida-nombre">☀️ Desayuno — HH:MM</div></div>
+        <div class="comida-desc">
+          • <strong>ALIMENTO 1</strong> (Xg / X medida casera)<br>
+          • <strong>ALIMENTO 2</strong> (Xg / X medida casera)
+        </div>
+        <div class="badge-row"><span class="badge badge-p">P: Xg</span><span class="badge badge-c">C: Xg</span><span class="badge badge-g">G: Xg</span><span class="badge badge-k">XXX kcal</span></div>
+      </div>
+
+      <!-- Repetir comida-card para Snack, Almuerzo, Merienda, Cena -->
+
+      <div class="w-6654aa">
+        <div class="w-1e93f9">✅ Total Lunes:</div>
+        <div class="badge-row"><span class="badge badge-p">P: Xg</span><span class="badge badge-c">C: Xg</span><span class="badge badge-g">G: Xg</span><span class="badge badge-k">~X,XXX kcal</span></div>
+      </div>
+    </div>
+
+    <!-- Repetir para nut-mar, nut-mie, nut-jue, nut-vie, nut-sab, nut-dom -->
+    <div id="nut-mar" class="tab-content"></div>
+    <div id="nut-mie" class="tab-content"></div>
+    <div id="nut-jue" class="tab-content"></div>
+    <div id="nut-vie" class="tab-content"></div>
+    <div id="nut-sab" class="tab-content"></div>
+    <div id="nut-dom" class="tab-content"></div>
+  `;
+  const _ENT_HTML = `<div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('ent','lun',this)">Lun · DÍA 1</button>
+      <button class="tab-btn" onclick="switchTab('ent','mar',this)">Mar · DÍA 2</button>
+      <button class="tab-btn" onclick="switchTab('ent','mie',this)">Mié · DÍA 3 🏠</button>
+      <button class="tab-btn" onclick="switchTab('ent','jue',this)">Jue · DÍA 4</button>
+      <button class="tab-btn" onclick="switchTab('ent','vie',this)">Vie · DÍA 5 🔥🏠</button>
+    </div>
+
+    <!-- ⚠️ INYECTAR: Un bloque ent-XXX por día, usando el formato de abajo -->
+    <!-- FORMATO DE UN DÍA: -->
+    <div id="ent-lun" class="tab-content active">
+      <div class="w-cf3a02" style="border-left:4px solid var(--azul-medio);">
+        <strong class="w-0cf08e">LUNES — NOMBRE DEL DÍA</strong>
+        <div class="w-ea68f4">GRUPOS MUSCULARES · DESCRIPCIÓN</div>
+        <div class="w-c06a4b" style="margin-top:8px;"><span class="chip">X ejercicios</span><span class="chip">X–X series</span><span class="chip">X–X reps</span><span class="chip">⏱ XX min</span></div>
+      </div>
+
+      <div class="w-df74e8">
+        <table class="tabla-ejercicios">
+          <thead><tr><th>#</th><th>Ejercicio</th><th>Series</th><th>Reps</th><th>Desc.</th><th>Ver</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><span class="prio-badge">🔑</span>EJERCICIO PRINCIPAL</td><td>X</td><td>X–X</td><td>XX seg</td><td><a class="yt-link" href="https://www.youtube.com/results?search_query=EJERCICIO+tecnica+correcta" target="_blank">▶ YT</a></td></tr>
+            <!-- Repetir fila por cada ejercicio -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="finisher-box">
+        <div class="fin-title">🔥 FINISHER</div>
+        <ul><li>DESCRIPCIÓN DEL FINISHER</li></ul>
+      </div>
+
+      <!-- CASA: días lun/mar/jue usan lista con video. Mié/Vie usan WOD AMRAP -->
+      <div class="casa-card" id="casa-lun">
+        <button class="casa-toggle-btn" onclick="toggleCasa('casa-lun')">
+          <span class="casa-tit">🏠 Versión en Casa / Aire Libre</span>
+          <span class="casa-chevron">▼</span>
+        </button>
+        <div class="casa-body">
+          <div class="casa-sub">DESCRIPCIÓN VERSIÓN CASA</div>
+          <div class="casa-ej-list">
+            <div class="casa-ej-item">
+              <div style="flex:1"><div class="ce-nom">EJERCICIO CASA</div><div class="ce-mus">MÚSCULO</div></div>
+              <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                <div class="ce-srs">X × X–X</div>
+                <a href="https://www.youtube.com/results?search_query=EJERCICIO+casa+tecnica" target="_blank" style="background:#E74C3C;color:white;text-decoration:none;font-size:11px;font-weight:800;border-radius:6px;padding:5px 8px">▶ Ver</a>
+              </div>
+            </div>
+          </div>
+          <div class="casa-timer-box">
+            <div class="ct-display" id="casa-display-casa-lun">1:00</div>
+            <div class="ct-presets">
+              <button class="ct-btn preset" onclick="casaSetTimer('casa-lun',45)">45s</button>
+              <button class="ct-btn preset" onclick="casaSetTimer('casa-lun',60)">60s</button>
+              <button class="ct-btn preset" onclick="casaSetTimer('casa-lun',75)">75s</button>
+            </div>
+            <div class="ct-actions">
+              <button class="ct-btn start" id="casa-btn-casa-lun" onclick="casaStartTimer('casa-lun')">▶ Iniciar</button>
+              <button class="ct-btn stop" onclick="casaResetTimer('casa-lun')">✕ Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Días mar, jue: mismo formato que lun (lista + timer) -->
+    <div id="ent-mar" class="tab-content"></div>
+    <div id="ent-jue" class="tab-content"></div>
+
+    <!-- Días mie, vie: WOD AMRAP (ver initHomeWorkouts en el JS) -->
+    <div id="ent-mie" class="tab-content">
+      <div class="casa-card" id="casa-mie">
+        <button class="casa-toggle-btn" onclick="toggleCasa('casa-mie')">
+          <span class="casa-tit">🏠 Versión en Casa / Aire Libre</span>
+          <span class="casa-chevron">▼</span>
+        </button>
+        <div class="casa-body">
+          <div class="casa-sub">WOD AMRAP — DESCRIPCIÓN</div>
+          <div class="wod-box">
+            <div class="wod-tag">🔥 WOD ESTILO CROSSFIT</div>
+            <div class="wod-tit">AMRAP — Circuito de 5 ejercicios</div>
+            <div class="wod-desc">DESCRIPCIÓN DEL WOD</div>
+            <div class="wod-ejercicio-actual">
+              <div class="wod-fase" id="wod-fase-mie">LISTA PARA EMPEZAR</div>
+              <div class="wod-ej-nombre" id="wod-ejercicio-nombre-mie">Toca Iniciar para comenzar</div>
+              <div class="wod-ej-reps" id="wod-ejercicio-reps-mie">5 ejercicios × 40 seg cada uno</div>
+              <a class="wod-ej-yt" id="wod-ejercicio-yt-mie" href="#" target="_blank">▶ Ver técnica en video</a>
+            </div>
+            <div class="wod-display" id="wod-display-mie">0:40</div>
+            <div class="wod-actions">
+              <button class="wb-btn start" id="wod-btn-mie" onclick="wodToggle('mie')">▶ Iniciar WOD</button>
+              <button class="wb-btn stop" onclick="wodReset('mie')">✕ Reset</button>
+            </div>
+            <div class="wod-ronda-list" id="wod-rondas-mie"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="ent-vie" class="tab-content">
+      <div class="casa-card" id="casa-vie">
+        <button class="casa-toggle-btn" onclick="toggleCasa('casa-vie')">
+          <span class="casa-tit">🏠 Versión en Casa / Aire Libre</span>
+          <span class="casa-chevron">▼</span>
+        </button>
+        <div class="casa-body">
+          <div class="casa-sub">WOD AMRAP — DESCRIPCIÓN</div>
+          <div class="wod-box">
+            <div class="wod-tag">🔥 WOD ESTILO CROSSFIT</div>
+            <div class="wod-tit">AMRAP — Circuito de 5 ejercicios</div>
+            <div class="wod-desc">DESCRIPCIÓN DEL WOD</div>
+            <div class="wod-ejercicio-actual">
+              <div class="wod-fase" id="wod-fase-vie">LISTA PARA EMPEZAR</div>
+              <div class="wod-ej-nombre" id="wod-ejercicio-nombre-vie">Toca Iniciar para comenzar</div>
+              <div class="wod-ej-reps" id="wod-ejercicio-reps-vie">5 ejercicios × 40 seg cada uno</div>
+              <a class="wod-ej-yt" id="wod-ejercicio-yt-vie" href="#" target="_blank">▶ Ver técnica en video</a>
+            </div>
+            <div class="wod-display" id="wod-display-vie">0:40</div>
+            <div class="wod-actions">
+              <button class="wb-btn start" id="wod-btn-vie" onclick="wodToggle('vie')">▶ Iniciar WOD</button>
+              <button class="wb-btn stop" onclick="wodReset('vie')">✕ Reset</button>
+            </div>
+            <div class="wod-ronda-list" id="wod-rondas-vie"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>`;
+
+  const _origShowSection = showSection;
+  window.showSection = function(id) {
+    if (id === 'nutricion' && !_lazyRendered.nut) {
+      const c = document.getElementById('nut-lazy-container');
+      if (c) { c.innerHTML = _NUT_HTML; _lazyRendered.nut = true; }
+    }
+    if (id === 'entreno' && !_lazyRendered.ent) {
+      const c = document.getElementById('ent-lazy-container');
+      if (c) { c.innerHTML = _ENT_HTML; _lazyRendered.ent = true; initHomeWorkouts(); }
+    }
+    _origShowSection(id);
+  };
+
+  // ===== NAVEGACIÓN =====
+  function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const _sec = document.getElementById(id);
+    if (_sec) _sec.classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => {
+      if (n.getAttribute('onclick') && n.getAttribute('onclick').includes(id)) n.classList.add('active');
+    });
+    // Cerrar nav en mobile
+    if (window.innerWidth <= 700) {
+      document.getElementById('nav').classList.remove('open');
+      document.getElementById('nav-overlay').classList.remove('visible');
+    }
+    window.scrollTo(0,0);
+  }
+
+  function toggleNav() {
+    const nav = document.getElementById('nav');
+    const overlay = document.getElementById('nav-overlay');
+    const isOpen = nav.classList.contains('open');
+    if (isOpen) {
+      nav.classList.remove('open');
+      overlay.classList.remove('visible');
+    } else {
+      nav.classList.add('open');
+      overlay.classList.add('visible');
+    }
+  }
+  function closeNav() {
+    document.getElementById('nav').classList.remove('open');
+    document.getElementById('nav-overlay').classList.remove('visible');
+  }
+
+  // ===== TABS =====
+  function switchTab(prefix, day, btn) {
+    if (prefix === 'nut' && !_lazyRendered.nut) {
+      const c = document.getElementById('nut-lazy-container');
+      if (c) { c.innerHTML = _NUT_HTML; _lazyRendered.nut = true; }
+    }
+    if (prefix === 'ent' && !_lazyRendered.ent) {
+      const c = document.getElementById('ent-lazy-container');
+      if (c) { c.innerHTML = _ENT_HTML; _lazyRendered.ent = true; initHomeWorkouts(); }
+    }
+    const allContents = document.querySelectorAll('[id^="'+prefix+'-"]');
+    allContents.forEach(c => c.classList.remove('active'));
+    const target = document.getElementById(prefix+'-'+day);
+    if (target) target.classList.add('active');
+    btn.closest('.card').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  // ===== TIMER =====
+  // ===== SONIDO DEL TIMER (Web Audio API, sin archivos externos) =====
+  // iOS Safari mata o invalida el AudioContext al bloquear pantalla / pasar a
+  // background, incluso reportando ctx.state = 'running' cuando ya no sirve.
+  // Por eso NO reutilizamos un solo contexto para siempre: lo validamos antes
+  // de cada beep y lo recreamos si hace falta.
+  let _audioCtx = null;
+  function getAudioCtx() {
+    if (!_audioCtx || _audioCtx.state === 'closed') {
+      try {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        _audioCtx = null;
+      }
+    }
+    return _audioCtx;
+  }
+  // Reproduce un beep. freq=tono, dur=duración en ms, vol=volumen (0 a 1, 1 = máximo)
+  async function beep(freq, dur, vol) {
+    try {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      // Si el contexto está suspendido (pasa tras inactividad, cambiar de pestaña,
+      // o volver de background en iOS), hay que ESPERAR a que se reanude antes
+      // de programar el sonido, o se pierde en silencio.
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      // En iOS, resume() puede "tener éxito" sin que el contexto realmente vuelva
+      // a sonar. Si tras intentar reanudar sigue sin estar 'running', lo damos
+      // por muerto, lo recreamos UNA vez y reintentamos con el nuevo.
+      if (ctx.state !== 'running') {
+        try { ctx.close(); } catch (e) {}
+        _audioCtx = null;
+        const ctx2 = getAudioCtx();
+        if (!ctx2) return;
+        if (ctx2.state === 'suspended') { await ctx2.resume(); }
+        return _reproducirBeep(ctx2, freq, dur, vol);
+      }
+      return _reproducirBeep(ctx, freq, dur, vol);
+    } catch (e) { /* Web Audio no disponible, se ignora */ }
+  }
+  function _reproducirBeep(ctx, freq, dur, vol) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square'; // 'square' suena más fuerte/notable que 'sine'
+    osc.frequency.value = freq;
+    gain.gain.value = vol;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    // pequeño fade-out para evitar click metálico al cortar
+    gain.gain.setValueAtTime(vol, ctx.currentTime + (dur/1000) - 0.03);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + (dur/1000));
+    osc.stop(ctx.currentTime + (dur/1000));
+  }
+  // "Despierta" el audio en el MISMO tap del usuario (requisito de iOS: el
+  // contexto solo se puede crear/reanudar dentro de un gesto directo del
+  // usuario, nunca desde un setInterval). Se llama al inicio de cada botón
+  // "Iniciar", antes de programar nada con setTimeout/setInterval.
+  function despertarAudio() {
+    try {
+      const ctx = getAudioCtx();
+      if (ctx && ctx.state === 'suspended') { ctx.resume(); }
+    } catch (e) {}
+  }
+  // Si el usuario vuelve de cambiar de app o de bloquear pantalla mientras un
+  // timer seguía corriendo, el AudioContext puede haber quedado inválido.
+  // Lo revalidamos apenas la pestaña vuelve a ser visible.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && _audioCtx && _audioCtx.state === 'suspended') {
+      _audioCtx.resume().catch(() => {});
+    }
+  });
+  function sonidoInicioTimer() {
+    beep(880, 180, 0.9); // beep agudo y fuerte al iniciar
+  }
+  function sonidoCuentaAtras() {
+    beep(740, 130, 0.85); // beep corto en cada uno de los ultimos 3 segundos
+  }
+  function sonidoFinTimer() {
+    // 3 beeps graves y fuertes, tipo silbato — inconfundible aunque no mires el celular
+    beep(660, 220, 1.0);
+    setTimeout(() => beep(660, 220, 1.0), 280);
+    setTimeout(() => beep(660, 320, 1.0), 560);
+  }
+
+  let timerInterval = null;
+  let timerTotal = 60;
+  let timerRemaining = 60;
+  // ===== WAKE LOCK — mantiene la pantalla encendida mientras el timer corre =====
+  // iOS Safari < 16.4 no soporta la API Screen Wake Lock.
+  // Fallback: un <video> invisible en loop que fuerza al sistema a mantener
+  // la pantalla activa — técnica usada en apps de fitness y recetas de cocina.
+  // En iOS, un video reproduciéndose (aunque sea transparente/silencioso)
+  // previene el bloqueo de pantalla igual que lo haría una app nativa.
+  let wakeLock = null;
+  let _wakeVideo = null;
+
+  function _crearVideoWake() {
+    if (_wakeVideo) return _wakeVideo;
+    // Video de 1×1 px, completamente transparente, en loop infinito.
+    // Lo creamos con un data URI de un MP4 mínimo (1 frame negro, <1KB).
+    // No necesita red: está embebido directamente en el código.
+    const v = document.createElement('video');
+    v.setAttribute('playsinline', '');   // iOS: reproducir en línea, no pantalla completa
+    v.setAttribute('muted', '');         // Sin sonido (no pide permisos de audio)
+    v.setAttribute('loop', '');          // Loop infinito
+    v.setAttribute('width', '1');
+    v.setAttribute('height', '1');
+    v.style.cssText = 'position:fixed;top:-2px;left:-2px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
+    // MP4 mínimo válido de 1 frame (hex → base64): generado off-line, sin red
+    v.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAr1tZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE1MiByMjg1NCBlOWE1OTAzIC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAxNyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTMgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTI1IHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAD2WIhAA3//728P4FNjuYAAAACgAAAA=';
+    document.body.appendChild(v);
+    _wakeVideo = v;
+    return v;
+  }
+
+  async function solicitarWakeLock() {
+    // Intento 1: Screen Wake Lock API (funciona en Chrome Android, Safari iOS 16.4+)
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        return; // Éxito — no necesitamos el video fallback
+      } catch (e) {
+        // Puede fallar si la página no está visible en ese momento
+        // (ej. el usuario acaba de volver de otra app). Lo ignoramos y
+        // caemos al fallback.
+      }
+    }
+    // Fallback: video invisible en loop — mantiene pantalla activa en iOS < 16.4
+    try {
+      const v = _crearVideoWake();
+      if (v.paused) {
+        const p = v.play();
+        if (p) p.catch(() => {}); // iOS requiere gesto del usuario para autoplay;
+        // como siempre llegamos aquí desde un tap ("Iniciar"), debería funcionar.
+      }
+    } catch (e) {}
+  }
+
+  function liberarWakeLock() {
+    // Liberar Screen Wake Lock API si estaba activa
+    if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+    // Pausar video fallback
+    if (_wakeVideo && !_wakeVideo.paused) {
+      _wakeVideo.pause();
+    }
+  }
+
+  // Si el usuario cambia de app y vuelve mientras el timer sigue corriendo,
+  // el wake lock se pierde solo — lo volvemos a pedir automáticamente.
+  // Además re-activamos el video si estaba corriendo.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const timerActivo = timerInterval || Object.values(_wodState || {}).some(s => s.corriendo)
+        || Object.values(_casaTimers || {}).some(t => t.interval);
+      if (timerActivo) solicitarWakeLock();
+    }
+  });
+
+  function setTimer(seg) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    liberarWakeLock();
+    timerTotal = seg;
+    timerRemaining = seg;
+    updateTimerDisplay();
+    document.getElementById('timer-ring').style.strokeDashoffset = '0';
+  }
+
+  function startTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      liberarWakeLock();
+      document.getElementById('btn-start').textContent = '▶ Iniciar';
+      return;
+    }
+    if (timerRemaining <= 0) timerRemaining = timerTotal;
+    document.getElementById('btn-start').textContent = '⏸ Pausar';
+    despertarAudio();
+    sonidoInicioTimer();
+    solicitarWakeLock();
+    timerInterval = setInterval(() => {
+      timerRemaining--;
+      updateTimerDisplay();
+      document.getElementById('timer-ring').style.strokeDashoffset = (666.13 * (1 - timerRemaining/timerTotal)) + '';
+      if (timerRemaining > 0 && timerRemaining <= 3) {
+        sonidoCuentaAtras(); // beep en 3, 2 y 1
+      }
+      if (timerRemaining <= 0) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        liberarWakeLock();
+        document.getElementById('btn-start').textContent = '▶ Iniciar';
+        sonidoFinTimer();
+        const td = document.getElementById('timer-display');
+        td.textContent = '✅';
+        td.style.color = '#27AE60';
+        td.style.fontSize = '80px';
+        if ('vibrate' in navigator) navigator.vibrate([300,100,300,100,300]);
+        setTimeout(() => {
+          td.textContent = '0:00';
+          td.style.color = '';
+          td.style.fontSize = '';
+        }, 2500);
+      }
+    }, 1000);
+  }
+
+    function resetTimer() {
+    const _td=document.getElementById('timer-display');if(_td){_td.style.color='';_td.style.fontSize='';}
+    clearInterval(timerInterval);
+    timerInterval = null;
+    liberarWakeLock();
+    timerRemaining = timerTotal;
+    updateTimerDisplay();
+    document.getElementById('timer-ring').style.strokeDashoffset = '0';
+    document.getElementById('btn-start').textContent = '▶ Iniciar';
+  }
+
+  function updateTimerDisplay() {
+    const m = Math.floor(timerRemaining/60);
+    const s = timerRemaining % 60;
+    document.getElementById('timer-display').textContent = m+':'+(s<10?'0':'')+s;
+  }
+
+  // ===== CHECKLIST =====
+  function toggleHabit(el) {
+    el.classList.toggle('done');
+    const c = el.querySelector('.check-circle');
+    c.textContent = el.classList.contains('done') ? '✓' : '';
+  }
+
+  function resetChecklist() {
+    document.querySelectorAll('.habit-item').forEach(el => {
+      el.classList.remove('done');
+      el.querySelector('.check-circle').textContent = '';
+    });
+  }
+
+  // ===== HIDRATACIÓN =====
+  let vasosLlenos = 0;
+  const totalVasos = 12;
+
+  function initVasos() {
+    const cont = document.getElementById('vasos-container');
+    cont.innerHTML = '';
+    for (let i=0; i<totalVasos; i++) {
+      const v = document.createElement('span');
+      v.className = 'vaso' + (i < vasosLlenos ? ' lleno' : '');
+      v.textContent = '🥤';
+      v.onclick = () => toggleVaso(i);
+      cont.appendChild(v);
+    }
+    actualizarAgua();
+  }
+
+  function toggleVaso(idx) {
+    vasosLlenos = idx < vasosLlenos ? idx : idx + 1;
+    initVasos();
+  }
+
+  function actualizarAgua() {
+    document.getElementById('vasos-count').textContent = vasosLlenos;
+    document.getElementById('agua-ml').textContent = (vasosLlenos*250).toLocaleString()+' ml / 3,000 ml';
+    document.getElementById('agua-progreso').style.width = Math.min((vasosLlenos/totalVasos)*100, 100)+'%';
+  }
+
+  function resetAgua() { vasosLlenos = 0; initVasos(); }
+
+  // ===== SEGUIMIENTO =====
+  function setEmocion(btn, emoji) {
+    document.querySelectorAll('.emocion-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    const textos = {'😫':'Día muy difícil. Está bien. Mañana es otra oportunidad.','😔':'Día bajo. El proceso no siempre es lineal. Sigue adelante.','😐':'Día normal. La consistencia gana sobre la motivación.','😊':'Buen día. Esa energía es combustible para el entreno.','🔥':'¡Modo bestia activado! NOMBRE en su máximo nivel.'};
+    document.getElementById('emocion-texto').textContent = textos[emoji] || '';
+    try { localStorage.setItem('emocion-'+CLIENTE_SLUG, emoji); } catch(e) { console.warn('setEmocion:', e); }
+  }
+
+  function previewFoto(inputId, previewId, key) {
+    const file = document.getElementById(inputId).files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = document.getElementById(previewId);
+      img.src = e.target.result;
+      img.style.display = 'block';
+      try { localStorage.setItem('foto-'+CLIENTE_SLUG+'-'+key, e.target.result); } catch(err) {}
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function guardarMedidas() {
+    const registro = {
+      fecha: new Date().toLocaleDateString('es-CO'),
+      peso: document.getElementById('med-peso').value,
+      cintura: document.getElementById('med-cintura').value,
+      cadera: document.getElementById('med-cadera').value,
+      pecho: document.getElementById('med-pecho').value,
+      brazo: document.getElementById('med-brazo').value,
+      muslo: document.getElementById('med-muslo').value
+    };
+    try {
+      let historial = JSON.parse(localStorage.getItem('historial-'+CLIENTE_SLUG) || '[]');
+      historial.unshift(registro);
+      localStorage.setItem('historial-'+CLIENTE_SLUG, JSON.stringify(historial));
+    } catch(e) { console.warn('guardarMedidas:', e); }
+    renderHistorial();
+    alert('✅ Registro guardado: ' + registro.fecha);
+  }
+
+  function renderHistorial() {
+    let h = [];
+    try { h = JSON.parse(localStorage.getItem('historial-'+CLIENTE_SLUG)||'[]'); } catch(e) { console.warn('renderHistorial:', e); }
+    const cont = document.getElementById('historial-container');
+    if (!cont) return;
+    if (!h.length) { cont.innerHTML='<div class="w-e3f8e3">Sin registros. Empieza esta semana.</div>'; return; }
+    const pesos = h.slice(0,8).reverse().filter(r=>r.peso).map(r=>parseFloat(r.peso));
+    let svgChart = '';
+    if (pesos.length >= 2) {
+      const W=320,H=64,pad=12;
+      const mn=Math.min(...pesos)-0.5, mx=Math.max(...pesos)+0.5;
+      const pts = pesos.map((p,i)=>{ const x=pad+(i/(pesos.length-1))*(W-pad*2); const y=H-pad-((p-mn)/(mx-mn||1))*(H-pad*2); return x.toFixed(1)+','+y.toFixed(1); });
+      const trend = pesos[pesos.length-1]<=pesos[0]?'#27AE60':'#E74C3C';
+      const diff = Math.abs(pesos[pesos.length-1]-pesos[0]).toFixed(1);
+      const arrow = pesos[pesos.length-1]<=pesos[0]?'bajó ':'subió ';
+      const circles = pesos.map((p,i)=>{ const x=pad+(i/(pesos.length-1))*(W-pad*2); const y=H-pad-((p-mn)/(mx-mn||1))*(H-pad*2); return '<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="5" fill="'+trend+'" stroke="white" stroke-width="2"/><text x="'+x.toFixed(1)+'" y="'+(y-9).toFixed(1)+'" text-anchor="middle" font-size="9" fill="'+trend+'" font-family="Barlow,sans-serif" font-weight="700">'+p+'</text>'; }).join('');
+      svgChart = '<div class="w-d3cbb7">'
+        +'<div class="w-0b10e5">Evolucion de Peso</div>'
+        +'<svg width="100%" viewBox="0 0 320 64" xmlns="http://www.w3.org/2000/svg">'
+        +'<polyline points="'+pts.join(' ')+'" fill="none" stroke="'+trend+'" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
+        +circles
+        +'</svg>'
+        +'<div class="w-813505">'
+        +'<span class="w-b61703">Inicio: '+pesos[0]+' kg</span>'
+        +'<span class="w-7b9ae0">'+arrow+diff+' kg</span>'
+        +'<span class="w-b61703">Actual: '+pesos[pesos.length-1]+' kg</span>'
+        +'</div></div>';
+    }
+    const tabla = h.slice(0,8).map(r=>'<div class="w-9022c6">'
+      +'<span class="w-cd701c">'+r.fecha+'</span>'
+      +'<span>'+( r.peso ? r.peso+' kg' : '--' )+'</span>'
+      +'<span>C: '+( r.cintura||'--' )+' cm</span>'
+      +'<span>'+( (r.brazo||'--') )+' cm</span>'
+      +'</div>').join('');
+    cont.innerHTML = svgChart + tabla;
+  }
+
+  function limpiarHistorial() {
+    if (confirm('¿Borrar todo el historial?')) {
+      try { localStorage.removeItem('historial-'+CLIENTE_SLUG); } catch(e) { console.warn('limpiarHistorial:', e); }
+      renderHistorial();
+    }
+  }
+
+  function guardarNotas() {
+    try { localStorage.setItem('notas-'+CLIENTE_SLUG, document.getElementById('notas-coach').value); } catch(e) { console.warn('guardarNotas:', e); }
+    alert('✅ Notas guardadas');
+  }
+
+  function agregarLogro() {
+    const txt = document.getElementById('nuevo-logro').value.trim();
+    if (!txt) return;
+    let logros = [];
+    try { logros = JSON.parse(localStorage.getItem('logros-'+CLIENTE_SLUG) || '[]'); } catch(e) { console.warn('agregarLogro get:', e); }
+    logros.unshift({ texto: txt, fecha: new Date().toLocaleDateString('es-CO') });
+    try { localStorage.setItem('logros-'+CLIENTE_SLUG, JSON.stringify(logros)); } catch(e) { console.warn('agregarLogro set:', e); }
+    document.getElementById('nuevo-logro').value = '';
+    renderLogros();
+  }
+
+  function renderLogros() {
+    let logros = [];
+    try { logros = JSON.parse(localStorage.getItem('logros-'+CLIENTE_SLUG) || '[]'); } catch(e) { console.warn('renderLogros:', e); }
+    const cont = document.getElementById('logros-container');
+    if (!cont) return;
+    if (!logros.length) { cont.innerHTML = '<div class="w-10d198">Agrega tu primer logro 🏆</div>'; return; }
+    cont.innerHTML = logros.map((l,i) =>
+      `<div class="w-ec4460">
+        <span>🏆</span><span><strong>${l.fecha}</strong> — ${l.texto}</span>
+        <button class="w-a118c3" onclick="borrarLogro(${i})">×</button>
+      </div>`
+    ).join('');
+  }
+
+  function borrarLogro(i) {
+    let logros = [];
+    try { logros = JSON.parse(localStorage.getItem('logros-'+CLIENTE_SLUG) || '[]'); } catch(e) { console.warn('borrarLogro get:', e); }
+    logros.splice(i,1);
+    try { localStorage.setItem('logros-'+CLIENTE_SLUG, JSON.stringify(logros)); } catch(e) { console.warn('borrarLogro set:', e); }
+    renderLogros();
+  }
+
+
+  
+  // ===== INIT =====
+  document.addEventListener('DOMContentLoaded', () => {
+    try { initPlanStatus(); } catch(e) { console.warn('initPlanStatus:', e); }
+    try { initVasos(); } catch(e) { console.warn('initVasos:', e); }
+    try { renderHistorial(); } catch(e) { console.warn('renderHistorial call:', e); }
+    try { renderLogros(); } catch(e) { console.warn('renderLogros call:', e); }
+
+    // Cargar notas
+    try {
+      const notas = localStorage.getItem('notas-'+CLIENTE_SLUG);
+      if (notas) document.getElementById('notas-coach').value = notas;
+    } catch(e) { console.warn('cargar notas:', e); }
+
+    // Cargar fotos
+    try {
+      ['front','lat','post'].forEach(k => {
+        const data = localStorage.getItem('foto-'+CLIENTE_SLUG+'-'+k);
+        if (data) {
+          const img = document.getElementById('preview-'+k);
+          if (img) { img.src = data; img.style.display = 'block'; }
+        }
+      });
+    } catch(e) { console.warn('cargar fotos:', e); }
+
+    // Cargar emoción
+    try {
+      const emo = localStorage.getItem('emocion-'+CLIENTE_SLUG);
+      if (emo) {
+        document.querySelectorAll('.emocion-btn').forEach(b => {
+          if (b.textContent === emo) b.classList.add('selected');
+        });
+      }
+    } catch(e) { console.warn('cargar emocion:', e); }
+  });
+
+  // ===========================================================
+  // ===== CONFIGURACIÓN DEL CLIENTE — ÚNICO BLOQUE A EDITAR =====
+  // ===========================================================
+  const CLIENTE_SLUG    = 'SLUG_CLIENTE';        // ⚠️ EDITAR: ej: 'laura', 'yeimi', 'camilo'
+  const CLIENTE_NOMBRE  = 'NOMBRE COMPLETO';     // ⚠️ EDITAR: ej: 'Laura Rojas'
+  const PLAN_INICIO     = '2026-07-09';          // ⚠️ EDITAR: fecha de inicio del plan, formato 'YYYY-MM-DD'
+  const PLAN_DIAS       = 30;                    // duración del ciclo en días (normalmente no cambia)
+  const PLAN_CODIGO     = 'BRV-2026-XXX';        // ⚠️ EDITAR: ej: 'BRV-2026-007'
+  const COACH_WA_NUM    = '573228757918';        // WhatsApp de Coach Will (normalmente no cambia)
+  const COACH_PIN       = '1801';                // PIN para el panel de ajuste de fecha (normalmente no cambia)
+  // ===========================================================
+
+  function abrirAjusteFecha() {
+    const panel = document.getElementById('panel-ajuste-fecha');
+    const yaAbierto = panel.style.display === 'block';
+    panel.style.display = yaAbierto ? 'none' : 'block';
+    // siempre que se abre, vuelve a pedir el PIN (no se queda "desbloqueado")
+    if (!yaAbierto) {
+      document.getElementById('ajuste-paso-pin').style.display = 'block';
+      document.getElementById('ajuste-paso-fecha').style.display = 'none';
+      document.getElementById('ajuste-pin-input').value = '';
+      document.getElementById('ajuste-pin-error').style.display = 'none';
+    }
+  }
+
+  function verificarPinAjuste() {
+    const valor = document.getElementById('ajuste-pin-input').value;
+    if (valor === COACH_PIN) {
+      document.getElementById('ajuste-paso-pin').style.display = 'none';
+      document.getElementById('ajuste-paso-fecha').style.display = 'block';
+      // precarga con la fecha base actual (ajustada o la original)
+      let fechaBase = PLAN_INICIO;
+      try {
+        const ajuste = localStorage.getItem('ajuste-inicio-'+CLIENTE_SLUG);
+        if (ajuste) fechaBase = ajuste;
+      } catch(e) {}
+      document.getElementById('ajuste-fecha-input').value = fechaBase;
+    } else {
+      document.getElementById('ajuste-pin-error').style.display = 'block';
+    }
+  }
+
+  function guardarAjusteFecha() {
+    const nueva = document.getElementById('ajuste-fecha-input').value;
+    if (!nueva) { alert('Selecciona una fecha'); return; }
+    try { localStorage.setItem('ajuste-inicio-'+CLIENTE_SLUG, nueva); } catch(e) { console.warn('guardarAjusteFecha:', e); }
+    document.getElementById('panel-ajuste-fecha').style.display = 'none';
+    initPlanStatus(); // recalcula todo de inmediato con la nueva fecha base
+    alert('✅ Fecha actualizada. El plan se renovará desde el ' + nueva + ' cada 30 días.');
+  }
+
+  function initPlanStatus() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    // Si el coach ajustó manualmente la fecha de inicio del ciclo (cliente se atrasó en pagar),
+    // usamos esa fecha en vez de la fecha original del plan. Si no hay ajuste, usa PLAN_INICIO normal.
+    let fechaBase = PLAN_INICIO;
+    try {
+      const ajuste = localStorage.getItem('ajuste-inicio-'+CLIENTE_SLUG);
+      if (ajuste) fechaBase = ajuste;
+    } catch(e) { console.warn('leer ajuste fecha:', e); }
+    const ini = new Date(fechaBase + 'T00:00:00');
+
+    // ===== RENOVACIÓN AUTOMÁTICA =====
+    // Calculamos cuántos días han pasado desde el inicio (original o ajustado),
+    // y en qué ciclo de PLAN_DIAS días estamos. Al terminar un ciclo,
+    // el siguiente empieza solo, sin tocar nada.
+    const diasDesdeInicio = Math.round((hoy.getTime() - ini.getTime()) / (1000*60*60*24));
+    const cicloActual = diasDesdeInicio >= 0 ? Math.floor(diasDesdeInicio / PLAN_DIAS) : 0;
+    const inicioCiclo = new Date(ini.getTime()); inicioCiclo.setDate(ini.getDate() + cicloActual * PLAN_DIAS);
+    const finCiclo = new Date(inicioCiclo.getTime()); finCiclo.setDate(inicioCiclo.getDate() + PLAN_DIAS);
+
+    const fin = finCiclo;
+    const diasRestantes = Math.round((fin.getTime() - hoy.getTime()) / (1000*60*60*24));
+    const diasTranscurridos = PLAN_DIAS - diasRestantes;
+    const pct = Math.max(0, Math.min(100, (diasTranscurridos / PLAN_DIAS) * 100));
+    const numeroCiclo = cicloActual + 1; // ciclo 1 = primer mes, ciclo 2 = segundo mes, etc.
+
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const finStr = fin.getDate() + ' de ' + meses[fin.getMonth()] + ' de ' + fin.getFullYear();
+
+    const msgWa = encodeURIComponent('Hola Coach Will! Soy ' + CLIENTE_NOMBRE + ' (Plan ' + PLAN_CODIGO + ' · Mes ' + numeroCiclo + '). Quiero que revisemos mi progreso.');
+    const waUrl = 'https://wa.me/' + COACH_WA_NUM + '?text=' + msgWa;
+
+    const estadoBox  = document.getElementById('plan-estado-box');
+    const diasTxt    = document.getElementById('plan-dias-texto');
+    const veceTxt    = document.getElementById('plan-vence-texto');
+    const barra      = document.getElementById('plan-barra');
+    const waBtnDiv   = document.getElementById('plan-wa-btn');
+    const waLink     = document.getElementById('plan-wa-link');
+    const banner     = document.getElementById('banner-vencimiento');
+    const banTitulo  = document.getElementById('banner-titulo');
+    const banSub     = document.getElementById('banner-subtitulo');
+    const banWaLink  = document.getElementById('banner-wa-link');
+
+    if (waLink)    waLink.href    = waUrl;
+    if (banWaLink) banWaLink.href = waUrl;
+
+    // El plan se renueva solo cada PLAN_DIAS días — nunca queda "vencido" de verdad,
+    // por eso ya no existe el estado VENCIDO: solo ACTIVO o por terminar el mes (revisión con coach).
+    if (diasRestantes <= 5) {
+      // CIERRE DE MES — momento de revisar progreso con el coach, el plan ya se renueva solo
+      if (diasTxt)   diasTxt.textContent = diasRestantes <= 0 ? 'NUEVO MES INICIADO' : diasRestantes + (diasRestantes===1?' DIA PARA CIERRE DE MES':' DIAS PARA CIERRE DE MES');
+      if (diasTxt)   diasTxt.style.color = '#E67E22';
+      if (veceTxt)   veceTxt.textContent = 'Mes ' + numeroCiclo + ' · Cierra el ' + finStr + ' — tu plan sigue activo automáticamente';
+      if (barra)     { barra.style.width = pct + '%'; barra.style.background = '#E67E22'; }
+      if (estadoBox) estadoBox.style.background = '#FEF9E7';
+      if (waBtnDiv)  waBtnDiv.style.display = 'block';
+      if (banner)    { banner.style.display='block'; banner.style.background='#E67E22'; }
+      if (banTitulo) banTitulo.textContent = diasRestantes <= 0 ? 'NUEVO MES' : 'QUEDAN ' + diasRestantes + (diasRestantes===1?' DIA':' DIAS');
+      if (banSub)    banSub.textContent    = 'Cierre del mes ' + numeroCiclo + ' — buen momento para revisar tu progreso con Coach Will';
+      if ('vibrate' in navigator) navigator.vibrate([200,100,200]);
+
+    } else {
+      // ACTIVO — todo bien
+      if (diasTxt)   diasTxt.textContent = diasRestantes + ' dias restantes (Mes ' + numeroCiclo + ')';
+      if (diasTxt)   diasTxt.style.color = '#27AE60';
+      if (veceTxt)   veceTxt.textContent = 'Mes ' + numeroCiclo + ' · Vence el ' + finStr;
+      if (barra)     { barra.style.width = pct + '%'; barra.style.background = '#27AE60'; }
+      if (estadoBox) estadoBox.style.background = '#EBF7EE';
+      if (waBtnDiv)  waBtnDiv.style.display = 'none';
+      if (banner)    banner.style.display = 'none';
+    }
+
+    // Push nativo si tiene permiso (Chrome / Android)
+    if (diasRestantes <= 5 && diasRestantes >= 0 && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification('BRAVE — Cierre de mes', {
+          body: 'Quedan ' + diasRestantes + ' dias del mes ' + numeroCiclo + '. Tu plan se renueva automaticamente.'
+        });
+      } else if (Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            new Notification('BRAVE — Cierre de mes', {
+              body: 'Quedan ' + diasRestantes + ' dias del mes ' + numeroCiclo + '. Tu plan se renueva automaticamente.'
+            });
+          }
+        }).catch(e => console.warn('Permiso de notificacion:', e));
+      }
+    }
+  }
+
+</script>
+</body>
+</html>
